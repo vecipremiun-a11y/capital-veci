@@ -1,0 +1,224 @@
+// ============================================================
+//  Capital Veci — Esquema de base de datos
+//  Provider: SQLite / libSQL (Turso) vía driver adapter.
+//  Nota: SQLite no soporta enums nativos en Prisma, por lo que
+//  los estados se modelan como String con valores documentados
+//  (ver src/lib/constants.ts).
+// ============================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------
+//  Usuarios y acceso
+// ---------------------------------------------------------
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  // ADMIN | CONTADOR | OPERADOR | INVERSIONISTA
+  role         String   @default("OPERADOR")
+  active       Boolean  @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Vínculo opcional con un inversionista (para el portal privado)
+  investor   Investor? @relation(fields: [investorId], references: [id], onDelete: SetNull)
+  investorId String?   @unique
+
+  auditLogs AuditLog[]
+}
+
+// ---------------------------------------------------------
+//  Inversionistas
+// ---------------------------------------------------------
+model Investor {
+  id              String   @id @default(cuid())
+  fullName        String
+  rut             String   @unique
+  email           String?
+  phone           String?
+  // ACTIVE | FINISHED | RISK | BLOCKED
+  status          String   @default("ACTIVE")
+  investedCapital Float    @default(0)
+  joinDate        DateTime @default(now())
+  // Rentabilidad pactada anual (%)
+  expectedReturn  Float    @default(0)
+  // LOW | MEDIUM | HIGH
+  riskLevel       String   @default("LOW")
+  notes           String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user      User?
+  contracts Contract[]
+  payments  Payment[]
+  documents Document[]
+}
+
+// ---------------------------------------------------------
+//  Contratos digitales
+// ---------------------------------------------------------
+model Contract {
+  id             String   @id @default(cuid())
+  code           String   @unique
+  investor       Investor @relation(fields: [investorId], references: [id], onDelete: Cascade)
+  investorId     String
+  amount         Float
+  durationMonths Int
+  // Rentabilidad pactada (%)
+  returnRate     Float
+  // FIXED | VARIABLE | PARTICIPATION
+  modality       String   @default("FIXED")
+  // MONTHLY | QUARTERLY | AT_MATURITY | CUSTOM — define el modelo de pago
+  paymentFrequency     String  @default("MONTHLY")
+  // CUSTOM: cada cuántos meses se paga interés
+  customIntervalMonths Int?
+  // CUSTOM: % del interés del período que se paga (resto acumula al final)
+  periodicInterestPct  Float   @default(100)
+  startDate      DateTime
+  endDate        DateTime
+  // DRAFT | ACTIVE | SIGNED | EXPIRED | CANCELLED
+  status         String   @default("DRAFT")
+  conditions     String?
+  signedAt       DateTime?
+  signatureName  String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  payments  Payment[]
+  documents Document[]
+}
+
+// ---------------------------------------------------------
+//  Pagos
+// ---------------------------------------------------------
+model Payment {
+  id         String    @id @default(cuid())
+  investor   Investor  @relation(fields: [investorId], references: [id], onDelete: Cascade)
+  investorId String
+  contract   Contract? @relation(fields: [contractId], references: [id], onDelete: SetNull)
+  contractId String?
+  // INTEREST | CAPITAL_RETURN | MONTHLY | OTHER
+  type       String    @default("MONTHLY")
+  amount     Float
+  dueDate    DateTime
+  paidDate   DateTime?
+  // PENDING | PAID | OVERDUE | SCHEDULED | CANCELLED
+  status     String    @default("PENDING")
+  method     String?
+  reference  String?
+  notes      String?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+}
+
+// ---------------------------------------------------------
+//  Operaciones comerciales
+// ---------------------------------------------------------
+model Operation {
+  id             String    @id @default(cuid())
+  code           String    @unique
+  name           String
+  description    String?
+  capitalUsed    Float     @default(0)
+  expectedReturn Float     @default(0)
+  actualReturn   Float?
+  // ACTIVE | FINISHED | RISK | PAUSED
+  status         String    @default("ACTIVE")
+  // LOW | MEDIUM | HIGH
+  riskLevel      String    @default("MEDIUM")
+  startDate      DateTime
+  endDate        DateTime?
+  result         String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  movements CapitalMovement[]
+}
+
+// ---------------------------------------------------------
+//  Movimientos de capital / tesorería
+// ---------------------------------------------------------
+model CapitalMovement {
+  id          String     @id @default(cuid())
+  // INFLOW | OUTFLOW | RESERVE | COMMITTED | RETURN
+  type        String
+  amount      Float
+  category    String?
+  description String?
+  date        DateTime   @default(now())
+  operation   Operation? @relation(fields: [operationId], references: [id], onDelete: SetNull)
+  operationId String?
+  createdAt   DateTime   @default(now())
+}
+
+// ---------------------------------------------------------
+//  Documentos adjuntos
+// ---------------------------------------------------------
+model Document {
+  id         String    @id @default(cuid())
+  name       String
+  type       String?
+  url        String
+  investor   Investor? @relation(fields: [investorId], references: [id], onDelete: Cascade)
+  investorId String?
+  contract   Contract? @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  contractId String?
+  uploadedAt DateTime  @default(now())
+}
+
+// ---------------------------------------------------------
+//  Alertas del sistema
+// ---------------------------------------------------------
+model Alert {
+  id        String   @id @default(cuid())
+  // INFO | WARNING | DANGER | SUCCESS
+  level     String   @default("INFO")
+  title     String
+  message   String
+  category  String?
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
+
+// ---------------------------------------------------------
+//  Bitácora / logs del sistema
+// ---------------------------------------------------------
+model AuditLog {
+  id        String   @id @default(cuid())
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  userId    String?
+  action    String
+  entity    String?
+  entityId  String?
+  detail    String?
+  createdAt DateTime @default(now())
+}
+
+// ---------------------------------------------------------
+//  Configuración de la empresa (singleton)
+// ---------------------------------------------------------
+model CompanySettings {
+  id                String   @id @default("singleton")
+  companyName       String   @default("Capital Veci")
+  legalName         String?
+  taxId             String?
+  currency          String   @default("CLP")
+  // % de capital que debe mantenerse en reserva
+  reservePercentage Float    @default(20)
+  // Liquidez mínima absoluta exigida
+  minLiquidity      Float    @default(0)
+  // % máximo de capital comprometido permitido
+  maxCommitment     Float    @default(80)
+  alertsEnabled     Boolean  @default(true)
+  updatedAt         DateTime @updatedAt
+}

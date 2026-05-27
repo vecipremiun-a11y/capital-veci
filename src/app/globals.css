@@ -1,0 +1,215 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Tema oscuro por defecto — banca privada / capital privado */
+    --background: 222 24% 6%;
+    --foreground: 40 18% 92%;
+
+    --card: 222 22% 9%;
+    --card-foreground: 40 18% 92%;
+
+    --popover: 222 24% 8%;
+    --popover-foreground: 40 18% 92%;
+
+    /* Dorado discreto como color primario */
+    --primary: 43 64% 52%;
+    --primary-foreground: 222 47% 8%;
+
+    --secondary: 222 16% 14%;
+    --secondary-foreground: 40 18% 92%;
+
+    --muted: 222 16% 13%;
+    --muted-foreground: 220 10% 60%;
+
+    --accent: 158 40% 16%;
+    --accent-foreground: 158 64% 70%;
+
+    --destructive: 0 62% 48%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 222 14% 16%;
+    --input: 222 14% 18%;
+    --ring: 43 64% 52%;
+
+    /* Marca */
+    --gold: 43 70% 55%;
+    --gold-foreground: 222 47% 8%;
+    --gold-muted: 43 40% 30%;
+    --emerald: 158 64% 45%;
+    --emerald-foreground: 222 47% 8%;
+
+    --success: 158 64% 45%;
+    --warning: 38 92% 55%;
+    --danger: 0 72% 56%;
+
+    --radius: 0.75rem;
+  }
+
+  /* Modo claro (alternativo, por completitud). El sistema usa dark por defecto. */
+  .light {
+    --background: 40 30% 97%;
+    --foreground: 222 30% 12%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 30% 12%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 30% 12%;
+    --primary: 43 64% 42%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 220 16% 92%;
+    --secondary-foreground: 222 30% 12%;
+    --muted: 220 16% 92%;
+    --muted-foreground: 220 10% 40%;
+    --accent: 158 40% 90%;
+    --accent-foreground: 158 64% 24%;
+    --border: 220 16% 86%;
+    --input: 220 16% 86%;
+    --ring: 43 64% 42%;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html {
+    color-scheme: dark;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "rlig" 1, "calt" 1, "ss01" 1;
+  }
+
+  /* Scrollbar premium */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--border));
+    border-radius: 9999px;
+    border: 2px solid hsl(var(--background));
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--muted-foreground) / 0.5);
+  }
+}
+
+@layer components {
+  /* Fondo con textura sutil para el shell de la app */
+  .app-bg {
+    background-color: hsl(var(--background));
+    background-image:
+      radial-gradient(
+        60rem 60rem at 100% 0%,
+        hsl(var(--gold) / 0.04),
+        transparent 60%
+      ),
+      radial-gradient(
+        50rem 50rem at 0% 100%,
+        hsl(var(--emerald) / 0.04),
+        transparent 55%
+      );
+  }
+
+  .glass-panel {
+    background: linear-gradient(
+      180deg,
+      hsl(var(--card) / 0.9),
+      hsl(var(--card) / 0.7)
+    );
+    backdrop-filter: blur(12px);
+    border: 1px solid hsl(var(--border));
+  }
+
+  .gold-text {
+    background: linear-gradient(
+      120deg,
+      hsl(43 80% 70%),
+      hsl(43 64% 50%) 60%,
+      hsl(38 50% 40%)
+    );
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  .hairline {
+    border-bottom: 1px solid hsl(var(--border));
+  }
+
+  /* Línea divisoria con brillo dorado para encabezados */
+  .gold-rule {
+    height: 1px;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      hsl(var(--gold) / 0.5),
+      transparent
+    );
+  }
+
+  .kpi-grid {
+    display: grid;
+    gap: 1rem;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  }
+
+  .skeleton {
+    @apply relative overflow-hidden rounded-md bg-muted;
+  }
+  .skeleton::after {
+    @apply absolute inset-0 -translate-x-full animate-shimmer;
+    content: "";
+    background: linear-gradient(
+      90deg,
+      transparent,
+      hsl(var(--foreground) / 0.06),
+      transparent
+    );
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+/* Impresión de contratos: solo se imprime el documento legal */
+@media print {
+  body {
+    background: #fff !important;
+    color: #111 !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+  .print-document {
+    position: absolute !important;
+    inset: 0 !important;
+    margin: 0 !important;
+    padding: 2.5rem 3rem !important;
+    width: 100% !important;
+    max-width: none !important;
+    border: none !important;
+    box-shadow: none !important;
+    background: #fff !important;
+    color: #111 !important;
+  }
+  .print-document * {
+    color: #111 !important;
+    border-color: #ccc !important;
+  }
+  @page {
+    margin: 1.5cm;
+  }
+}
