@@ -65,6 +65,36 @@ model Investor {
 }
 
 // ---------------------------------------------------------
+//  Plantillas de contratos
+//  Modelos preconfigurados que aceleran la generación de
+//  contratos digitales. Valores opcionales (returnRate,
+//  durationMonths) representan "variable / según operación".
+// ---------------------------------------------------------
+model ContractTemplate {
+  id               String   @id @default(cuid())
+  code             String   @unique
+  name             String
+  description      String?
+  // FIXED | VARIABLE | PARTICIPATION
+  modality         String   @default("FIXED")
+  // MONTHLY | QUARTERLY | AT_MATURITY | CUSTOM
+  paymentFrequency String   @default("MONTHLY")
+  customIntervalMonths Int?
+  periodicInterestPct  Float @default(100)
+  // Si returnRate es null se considera "variable / según operación"
+  returnRate       Float?
+  // Override del texto mostrado en la tarjeta para la rentabilidad
+  rateLabel        String?
+  // Si durationMonths es null se considera "variable"
+  durationMonths   Int?
+  // Override del texto mostrado en la tarjeta para el plazo
+  durationLabel    String?
+  isDefault        Boolean  @default(false)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
+
+// ---------------------------------------------------------
 //  Contratos digitales
 // ---------------------------------------------------------
 model Contract {

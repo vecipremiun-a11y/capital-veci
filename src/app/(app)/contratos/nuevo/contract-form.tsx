@@ -28,12 +28,23 @@ function SubmitButton() {
   );
 }
 
+export interface ContractTemplateDefaults {
+  modality: string;
+  paymentFrequency: string;
+  returnRate: number | null;
+  durationMonths: number | null;
+  customIntervalMonths: number | null;
+  periodicInterestPct: number;
+}
+
 export function ContractForm({
   investors,
   preselected,
+  template,
 }: {
   investors: { id: string; fullName: string; expectedReturn: number; investedCapital: number }[];
   preselected?: string;
+  template?: ContractTemplateDefaults;
 }) {
   const [state, action] = useActionState<ContractFormState, FormData>(
     createContract,
@@ -42,11 +53,18 @@ export function ContractForm({
   const fe = state.fieldErrors ?? {};
 
   const [amount, setAmount] = useState(0);
-  const [rate, setRate] = useState(12);
-  const [duration, setDuration] = useState(12);
-  const [frequency, setFrequency] = useState<PaymentFrequency>("MONTHLY");
-  const [customInterval, setCustomInterval] = useState(1);
-  const [periodicPct, setPeriodicPct] = useState(50);
+  const [rate, setRate] = useState(template?.returnRate ?? 12);
+  const [duration, setDuration] = useState(template?.durationMonths ?? 12);
+  const [frequency, setFrequency] = useState<PaymentFrequency>(
+    (template?.paymentFrequency as PaymentFrequency) || "MONTHLY",
+  );
+  const [customInterval, setCustomInterval] = useState(
+    template?.customIntervalMonths ?? 1,
+  );
+  const [periodicPct, setPeriodicPct] = useState(
+    template?.periodicInterestPct ?? 50,
+  );
+  const defaultModality = template?.modality ?? "FIXED";
 
   const schedule = useMemo(
     () =>
@@ -157,7 +175,7 @@ export function ContractForm({
 
             <div className="space-y-2">
               <Label htmlFor="modality">Modalidad</Label>
-              <select id="modality" name="modality" className={selectClass} defaultValue="FIXED">
+              <select id="modality" name="modality" className={selectClass} defaultValue={defaultModality}>
                 <option value="FIXED">Renta fija</option>
                 <option value="VARIABLE">Renta variable</option>
                 <option value="PARTICIPATION">Participación</option>

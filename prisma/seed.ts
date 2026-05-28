@@ -44,6 +44,46 @@ async function main() {
   await db.investor.deleteMany();
   await db.operation.deleteMany();
   await db.companySettings.deleteMany();
+  await db.contractTemplate.deleteMany();
+
+  // -------------------- Plantillas de contratos --------------------
+  await db.contractTemplate.createMany({
+    data: [
+      {
+        code: "RF-12",
+        name: "Renta fija mensual",
+        description:
+          "Capital con rentabilidad mensual pactada, devolución al término del plazo.",
+        modality: "FIXED",
+        paymentFrequency: "MONTHLY",
+        returnRate: 12,
+        rateLabel: "10% – 14% anual",
+        durationMonths: 12,
+        isDefault: true,
+      },
+      {
+        code: "RV-T",
+        name: "Renta variable trimestral",
+        description:
+          "Rentabilidad asociada al resultado real de las operaciones, distribuida cada trimestre.",
+        modality: "VARIABLE",
+        paymentFrequency: "QUARTERLY",
+        rateLabel: "Variable",
+        durationMonths: 12,
+        durationLabel: "6 – 18 meses",
+      },
+      {
+        code: "PART",
+        name: "Participación en operación",
+        description:
+          "El inversionista participa de la rentabilidad neta de una operación específica.",
+        modality: "PARTICIPATION",
+        paymentFrequency: "AT_MATURITY",
+        rateLabel: "Según operación",
+        durationLabel: "Variable",
+      },
+    ],
+  });
 
   const hash = await bcrypt.hash(DEMO_PASSWORD, 10);
 
