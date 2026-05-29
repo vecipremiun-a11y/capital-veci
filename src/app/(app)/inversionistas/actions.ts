@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { requirePermission } from "@/lib/auth";
+import { hashPassword, requirePermission } from "@/lib/auth";
 
 const investorSchema = z.object({
   fullName: z.string().min(3, "Nombre demasiado corto"),
@@ -83,6 +83,95 @@ export async function createInvestor(
 
   revalidatePath("/inversionistas");
   redirect(`/inversionistas/${investor.id}`);
+}
+
+// ---------------------------------------------------------
+//  Crear acceso al portal para un inversionista existente
+// ---------------------------------------------------------
+const accessSchema = z.object({
+  email: z.string().email("Correo inválido").max(120),
+  password: z
+    .string()
+    .min(8, "Mínimo 8 caracteres")
+    .max(120, "Máximo 120 caracteres"),
+});
+
+export interface AccessFormState {
+  ok?: boolean;
+  error?: string;
+  fieldErrors?: Record<string, string>;
+}
+
+export async function createInvestorAccess(
+  investorId: string,
+  _prev: AccessFormState,
+  formData: FormData,
+): Promise<AccessFormState> {
+  const session = await requirePermission("admin");
+
+  const parsed = accessSchema.safeParse({
+    email: String(formData.get("email") || "").trim().toLowerCase(),
+    password: formData.get("password"),
+  });
+
+  if (!parsed.success) {
+    const fieldErrors: Record<string, string> = {};
+    for (const issue of parsed.error.issues)
+      fieldErrors[String(issue.path[0])] = issue.message;
+    return { error: "Revisa los campos.", fieldErrors };
+  }
+
+  const data = parsed.data;
+
+  const investor = await db.investor.findUnique({
+    where: { id: investorId },
+    include: { user: true },
+  });
+
+  if (!investor) {
+    return { error: "Inversionista no encontrado." };
+  }
+  if (investor.user) {
+    return {
+      error: "Este inversionista ya tiene cuenta de portal.",
+    };
+  }
+
+  // Email único en User
+  const emailTaken = await db.user.findUnique({ where: { email: data.email } });
+  if (emailTaken) {
+    return {
+      error: "Ese correo ya está en uso por otro usuario.",
+      fieldErrors: { email: "Correo duplicado" },
+    };
+  }
+
+  const passwordHash = await hashPassword(data.password);
+
+  const user = await db.user.create({
+    data: {
+      name: investor.fullName,
+      email: data.email,
+      passwordHash,
+      role: "INVERSIONISTA",
+      active: true,
+      investorId: investor.id,
+    },
+  });
+
+  await db.auditLog.create({
+    data: {
+      userId: session.sub,
+      action: "CREATE",
+      entity: "User",
+      entityId: user.id,
+      detail: `Acceso al portal creado para ${investor.fullName}`,
+    },
+  });
+
+  revalidatePath(`/inversionistas/${investorId}`);
+  revalidatePath("/admin");
+  return { ok: true };
 }
 
 export async function toggleInvestorBlock(id: string) {

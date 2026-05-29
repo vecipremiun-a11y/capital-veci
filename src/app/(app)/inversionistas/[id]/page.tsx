@@ -10,6 +10,7 @@ import {
   TrendingUp,
   CalendarClock,
   FileText,
+  ShieldCheck,
 } from "lucide-react";
 import { db } from "@/lib/db";
 import {
@@ -25,8 +26,10 @@ import {
 } from "@/lib/constants";
 import { PageHeader } from "@/components/shared/page-header";
 import { StatusBadge, RiskBadge } from "@/components/shared/status-badge";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { InvestorAccessDialog } from "./investor-access-dialog";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -75,6 +78,7 @@ export default async function InvestorProfile({
       contracts: { orderBy: { createdAt: "desc" } },
       payments: { orderBy: { dueDate: "desc" }, include: { contract: true } },
       documents: { orderBy: { uploadedAt: "desc" } },
+      user: true,
     },
   });
 
@@ -130,9 +134,24 @@ export default async function InvestorProfile({
               </div>
             </div>
           </div>
-          <div className="flex items-center gap-2 pb-1">
+          <div className="flex flex-wrap items-center gap-2 pb-1">
             <RiskBadge level={investor.riskLevel} />
             <StatusBadge status={investor.status} />
+            {investor.user ? (
+              <Badge
+                variant="muted"
+                className="flex items-center gap-1.5 border-emerald/40 bg-emerald/10 text-emerald"
+              >
+                <ShieldCheck className="size-3.5" />
+                Acceso al portal · {investor.user.email}
+              </Badge>
+            ) : (
+              <InvestorAccessDialog
+                investorId={investor.id}
+                investorName={investor.fullName}
+                defaultEmail={investor.email}
+              />
+            )}
             <Button asChild variant="gold" size="sm">
               <Link href={`/contratos/nuevo?investor=${investor.id}`}>
                 <FileSignature /> Nuevo contrato

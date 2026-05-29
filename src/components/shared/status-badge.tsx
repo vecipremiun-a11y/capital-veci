@@ -27,6 +27,7 @@ const STATUS_VARIANT: Record<string, Variant> = {
   SCHEDULED: "outline",
   // Operaciones
   PAUSED: "warning",
+  LOSS: "danger",
 };
 
 const RISK_VARIANT: Record<string, Variant> = {

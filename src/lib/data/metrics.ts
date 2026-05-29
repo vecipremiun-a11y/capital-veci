@@ -1,5 +1,6 @@
 import "server-only";
 import { db } from "@/lib/db";
+import { OPERATION_COMMITTED_STATUSES } from "@/lib/constants";
 
 const MONTH_LABELS = [
   "Ene",
@@ -57,8 +58,12 @@ export async function getDashboardMetrics(): Promise<DashboardMetrics> {
   const maxCommitment = settings?.maxCommitment ?? 80;
 
   const totalCapital = investors.reduce((s, i) => s + i.investedCapital, 0);
+  // Capital comprometido = todo lo que está EN una operación viva (activa,
+  // pausada o en riesgo). FINISHED ya devolvió el dinero; LOSS ya descontó.
   const capitalWorking = operations
-    .filter((o) => o.status === "ACTIVE" || o.status === "RISK")
+    .filter((o) =>
+      (OPERATION_COMMITTED_STATUSES as readonly string[]).includes(o.status),
+    )
     .reduce((s, o) => s + o.capitalUsed, 0);
   const reserves = Math.round(totalCapital * (reservePercentage / 100));
   const availableLiquidity = totalCapital - capitalWorking - reserves;
@@ -178,4 +183,85 @@ export async function getCapitalGrowth(months = 8): Promise<CapitalGrowthPoint[]
     points.push({ month: MONTH_LABELS[cutoff.getMonth()], capital });
   }
   return points;
+}
+
+// ---------------------------------------------------------
+//  Métricas del módulo Operaciones
+// ---------------------------------------------------------
+
+export interface OperationsMetrics {
+  /** Capital actualmente trabajando (operaciones vivas) */
+  capitalWorking: number;
+  /** Utilidad acumulada de operaciones cerradas con ganancia */
+  totalProfit: number;
+  /** Pérdida acumulada de operaciones LOSS (positivo, ej. 5_000_000) */
+  totalLoss: number;
+  /** Conteo de operaciones por estado */
+  countByStatus: Record<string, number>;
+  /** Rentabilidad real promedio de operaciones cerradas */
+  avgActualReturn: number;
+  /**
+   * Capital aportado por inversionistas (vía OperationParticipant) en
+   * operaciones VIVAS. El resto del capitalWorking es dinero de la empresa.
+   */
+  investorMoneyWorking: number;
+  /** Dinero de la empresa actualmente comprometido = capitalWorking - investorMoneyWorking */
+  companyMoneyWorking: number;
+  /** Operaciones activas (status ACTIVE) */
+  activeCount: number;
+  /** Operaciones en riesgo (status RISK) */
+  riskCount: number;
+}
+
+/**
+ * Métricas agregadas del módulo Operaciones, calculadas a partir de las
+ * operaciones y sus participantes. Sigue la misma filosofía que
+ * getDashboardMetrics: todo es derivado del estado actual de la BD, así
+ * que crear/finalizar/pérdida actualiza estos números automáticamente.
+ */
+export async function getOperationsMetrics(): Promise<OperationsMetrics> {
+  const operations = await db.operation.findMany({
+    include: { participants: true },
+  });
+
+  const live = operations.filter((o) =>
+    (OPERATION_COMMITTED_STATUSES as readonly string[]).includes(o.status),
+  );
+  const finished = operations.filter((o) => o.status === "FINISHED");
+  const lost = operations.filter((o) => o.status === "LOSS");
+
+  const capitalWorking = live.reduce((s, o) => s + o.capitalUsed, 0);
+  // En operaciones vivas, lo que aportaron los inversionistas:
+  const investorMoneyWorking = live.reduce(
+    (s, o) => s + o.participants.reduce((ss, p) => ss + p.amount, 0),
+    0,
+  );
+  const companyMoneyWorking = capitalWorking - investorMoneyWorking;
+
+  const totalProfit = finished.reduce((s, o) => s + (o.profit ?? 0), 0);
+  // profit en LOSS es negativo (returnAmount - capitalUsed); tomamos el valor absoluto
+  const totalLoss = lost.reduce((s, o) => s + Math.abs(o.profit ?? 0), 0);
+
+  const closed = [...finished, ...lost].filter((o) => o.actualReturn != null);
+  const avgActualReturn =
+    closed.length > 0
+      ? closed.reduce((s, o) => s + (o.actualReturn ?? 0), 0) / closed.length
+      : 0;
+
+  const countByStatus: Record<string, number> = {};
+  for (const o of operations) {
+    countByStatus[o.status] = (countByStatus[o.status] ?? 0) + 1;
+  }
+
+  return {
+    capitalWorking,
+    totalProfit,
+    totalLoss,
+    countByStatus,
+    avgActualReturn,
+    investorMoneyWorking,
+    companyMoneyWorking,
+    activeCount: countByStatus.ACTIVE ?? 0,
+    riskCount: countByStatus.RISK ?? 0,
+  };
 }

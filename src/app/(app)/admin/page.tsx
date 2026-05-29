@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
-import { ShieldCheck, Users as UsersIcon, Activity, KeyRound } from "lucide-react";
+import { ShieldCheck, Users as UsersIcon, Activity } from "lucide-react";
+import { CreateUserDialog } from "./create-user-dialog";
 import { db } from "@/lib/db";
 import { ROLE_LABELS, ROLE_PERMISSIONS } from "@/lib/constants";
 import { formatDateTime, initials } from "@/lib/format";
@@ -12,7 +13,6 @@ import {
   CardDescription,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   Table,
@@ -42,9 +42,7 @@ export default async function AdminPage() {
         title="Panel administrador"
         description="Gestión de usuarios, roles, permisos y bitácora del sistema."
       >
-        <Button variant="gold">
-          <KeyRound /> Crear usuario
-        </Button>
+        <CreateUserDialog />
       </PageHeader>
 
       {/* Roles & permisos */}

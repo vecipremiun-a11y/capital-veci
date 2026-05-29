@@ -135,7 +135,7 @@ export function ContractForm({
                 id="amount"
                 name="amount"
                 type="number"
-                min="1"
+                min="0"
                 step="1000"
                 value={amount || ""}
                 onChange={(e) => setAmount(Number(e.target.value))}

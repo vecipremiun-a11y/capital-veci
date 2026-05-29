@@ -106,10 +106,34 @@ export const PAYMENT_TYPE_LABELS: Record<string, string> = {
 
 export const OPERATION_STATUS_LABELS: Record<string, string> = {
   ACTIVE: "Activa",
-  FINISHED: "Finalizada",
-  RISK: "En riesgo",
   PAUSED: "Pausada",
+  RISK: "En riesgo",
+  FINISHED: "Finalizada",
+  LOSS: "Pérdida",
 };
+
+/**
+ * Estados que mantienen el capital comprometido (no devuelven liquidez):
+ * ACTIVE, PAUSED y RISK siguen contando como capital trabajando.
+ * FINISHED ya devolvió el dinero. LOSS ya descontó del capital total.
+ */
+export const OPERATION_COMMITTED_STATUSES = ["ACTIVE", "PAUSED", "RISK"] as const;
+
+export const OPERATION_CATEGORY_LABELS: Record<string, string> = {
+  MINIMARKET: "Minimarket",
+  LOANS: "Préstamos",
+  BARBERSHOP: "Barbería",
+  SOFTWARE: "Software",
+  CLEANING: "Limpieza",
+  IMPORTS: "Importaciones",
+  STOCK: "Stock",
+  COMMERCIAL: "Comercial",
+  EXPANSION: "Expansión",
+};
+
+export const OPERATION_CATEGORY_OPTIONS = Object.entries(
+  OPERATION_CATEGORY_LABELS,
+).map(([value, label]) => ({ value, label }));
 
 export const RISK_LABELS: Record<string, string> = {
   LOW: "Bajo",
@@ -121,6 +145,7 @@ export const MOVEMENT_TYPE_LABELS: Record<string, string> = {
   INFLOW: "Ingreso de capital",
   OUTFLOW: "Egreso",
   RESERVE: "Reserva",
-  COMMITTED: "Comprometido",
-  RETURN: "Retorno",
+  COMMITTED: "Capital comprometido",
+  RETURN: "Retorno de operación",
+  LOSS: "Pérdida registrada",
 };

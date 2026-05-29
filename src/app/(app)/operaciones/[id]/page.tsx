@@ -1,0 +1,404 @@
+import Link from "next/link";
+import { notFound } from "next/navigation";
+import type { Metadata } from "next";
+import {
+  ArrowLeft,
+  Briefcase,
+  Building2,
+  Calendar,
+  CheckCircle2,
+  Coins,
+  PiggyBank,
+  TrendingDown,
+  TrendingUp,
+  User as UserIcon,
+  Wallet,
+} from "lucide-react";
+import { db } from "@/lib/db";
+import {
+  formatCurrency,
+  formatDate,
+  formatDateTime,
+  formatPercent,
+} from "@/lib/format";
+import {
+  MOVEMENT_TYPE_LABELS,
+  OPERATION_CATEGORY_LABELS,
+  RISK_LABELS,
+} from "@/lib/constants";
+import { PageHeader } from "@/components/shared/page-header";
+import { StatusBadge, RiskBadge } from "@/components/shared/status-badge";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+} from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { OperationActions } from "./operation-actions";
+
+export const metadata: Metadata = { title: "Operación" };
+export const dynamic = "force-dynamic";
+
+export default async function OperationDetail({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const { id } = await params;
+  const op = await db.operation.findUnique({
+    where: { id },
+    include: {
+      responsible: { select: { id: true, name: true, role: true } },
+      participants: {
+        include: { investor: { select: { id: true, fullName: true } } },
+      },
+      movements: { orderBy: { date: "asc" } },
+    },
+  });
+
+  if (!op) notFound();
+
+  const isClosed = op.status === "FINISHED" || op.status === "LOSS";
+  const participantsTotal = op.participants.reduce((s, p) => s + p.amount, 0);
+  const companyShare = Math.max(op.capitalUsed - participantsTotal, 0);
+  const expectedReturnAmount = op.capitalUsed * (1 + op.expectedReturn / 100);
+
+  return (
+    <div className="space-y-6">
+      <Button asChild variant="ghost" size="sm" className="text-muted-foreground">
+        <Link href="/operaciones">
+          <ArrowLeft /> Volver a operaciones
+        </Link>
+      </Button>
+
+      <PageHeader
+        title={op.name}
+        description={`${OPERATION_CATEGORY_LABELS[op.category] ?? op.category} · ${op.code}`}
+      >
+        <div className="flex flex-wrap items-center gap-2">
+          <RiskBadge level={op.riskLevel} />
+          <StatusBadge status={op.status} />
+          {!isClosed && <OperationActions operationId={op.id} status={op.status} capitalUsed={op.capitalUsed} />}
+        </div>
+      </PageHeader>
+
+      {/* Banner de resultado para operaciones cerradas */}
+      {isClosed && (
+        <Card
+          className={
+            op.status === "FINISHED"
+              ? "border-emerald/30 bg-emerald/5"
+              : "border-destructive/30 bg-destructive/5"
+          }
+        >
+          <CardContent className="flex flex-wrap items-center justify-between gap-4 py-4">
+            <div className="flex items-center gap-3">
+              {op.status === "FINISHED" ? (
+                <CheckCircle2 className="size-6 text-[hsl(var(--success))]" />
+              ) : (
+                <TrendingDown className="size-6 text-destructive" />
+              )}
+              <div>
+                <p className="text-sm font-medium">
+                  {op.status === "FINISHED" ? "Operación finalizada" : "Operación con pérdida"}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Cerrada {op.closedAt ? formatDateTime(op.closedAt) : "—"}
+                </p>
+              </div>
+            </div>
+            <div className="text-right">
+              <p className="text-xs text-muted-foreground">
+                Retorno · Utilidad
+              </p>
+              <p className="font-display text-lg font-semibold">
+                {formatCurrency(op.returnAmount ?? 0)} ·{" "}
+                <span
+                  className={
+                    (op.profit ?? 0) >= 0
+                      ? "text-[hsl(var(--success))]"
+                      : "text-destructive"
+                  }
+                >
+                  {(op.profit ?? 0) >= 0 ? "+" : ""}
+                  {formatCurrency(op.profit ?? 0)}
+                </span>
+              </p>
+              {op.actualReturn != null && (
+                <p className="text-xs text-muted-foreground">
+                  Rentabilidad real: {formatPercent(op.actualReturn)}
+                </p>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Stats */}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <Stat
+          icon={Briefcase}
+          label="Capital comprometido"
+          value={formatCurrency(op.capitalUsed)}
+        />
+        <Stat
+          icon={Coins}
+          label="Aporte inversionistas"
+          value={formatCurrency(participantsTotal)}
+          hint={`${op.participants.length} participante(s)`}
+        />
+        <Stat
+          icon={PiggyBank}
+          label="Aporte empresa"
+          value={formatCurrency(companyShare)}
+        />
+        <Stat
+          icon={TrendingUp}
+          label={isClosed ? "Retorno real" : "Retorno proyectado"}
+          value={formatCurrency(
+            isClosed ? (op.returnAmount ?? 0) : expectedReturnAmount,
+          )}
+          hint={
+            isClosed
+              ? op.actualReturn != null
+                ? `${formatPercent(op.actualReturn)} real`
+                : "—"
+              : `${formatPercent(op.expectedReturn)} esperado`
+          }
+        />
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-3">
+        {/* Información lateral */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Información</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3 text-sm">
+            <Info icon={Building2} label="Negocio asociado" value={op.business ?? "—"} />
+            <Info
+              icon={UserIcon}
+              label="Responsable"
+              value={op.responsible?.name ?? "Sin asignar"}
+            />
+            <Info
+              icon={Calendar}
+              label="Inicio"
+              value={formatDate(op.startDate)}
+            />
+            <Info
+              icon={Calendar}
+              label="Término planificado"
+              value={op.endDate ? formatDate(op.endDate) : "—"}
+            />
+            {op.description && (
+              <div>
+                <p className="mb-1 text-xs text-muted-foreground">Descripción</p>
+                <p className="text-sm">{op.description}</p>
+              </div>
+            )}
+            {op.result && (
+              <div>
+                <p className="mb-1 text-xs text-muted-foreground">
+                  Resultado / nota de cierre
+                </p>
+                <p className="text-sm">{op.result}</p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Participantes */}
+        <Card className="lg:col-span-2">
+          <CardHeader>
+            <CardTitle>Inversionistas participantes</CardTitle>
+            <CardDescription>
+              Aporte y retorno por inversionista (pro rata al cerrar).
+            </CardDescription>
+          </CardHeader>
+          {op.participants.length === 0 ? (
+            <CardContent className="py-8 text-center text-sm text-muted-foreground">
+              Esta operación está financiada 100% con dinero de la empresa.
+            </CardContent>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Inversionista</TableHead>
+                  <TableHead className="text-right">Aporte</TableHead>
+                  <TableHead className="text-right">% Operación</TableHead>
+                  <TableHead className="text-right">
+                    {isClosed ? "Retorno" : "Esperado"}
+                  </TableHead>
+                  <TableHead className="text-right">Utilidad</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {op.participants.map((p) => {
+                  const pct =
+                    op.capitalUsed > 0
+                      ? (p.amount / op.capitalUsed) * 100
+                      : 0;
+                  const projected = p.amount * (1 + op.expectedReturn / 100);
+                  return (
+                    <TableRow key={p.id}>
+                      <TableCell>
+                        <Link
+                          href={`/inversionistas/${p.investor.id}`}
+                          className="font-medium hover:text-gold"
+                        >
+                          {p.investor.fullName}
+                        </Link>
+                      </TableCell>
+                      <TableCell className="text-right tabular">
+                        {formatCurrency(p.amount)}
+                      </TableCell>
+                      <TableCell className="text-right text-muted-foreground tabular">
+                        {formatPercent(pct, 1)}
+                      </TableCell>
+                      <TableCell className="text-right tabular">
+                        {formatCurrency(
+                          isClosed ? (p.returnAmount ?? 0) : projected,
+                        )}
+                      </TableCell>
+                      <TableCell
+                        className={`text-right tabular ${
+                          isClosed
+                            ? (p.profit ?? 0) >= 0
+                              ? "text-[hsl(var(--success))]"
+                              : "text-destructive"
+                            : "text-[hsl(var(--success))]"
+                        }`}
+                      >
+                        {isClosed
+                          ? `${(p.profit ?? 0) >= 0 ? "+" : ""}${formatCurrency(p.profit ?? 0)}`
+                          : `+${formatCurrency(projected - p.amount)}`}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          )}
+        </Card>
+      </div>
+
+      {/* Timeline financiero */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Timeline financiero</CardTitle>
+          <CardDescription>
+            Cada evento es un movimiento de capital registrado en la base.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {op.movements.length === 0 ? (
+            <p className="py-6 text-center text-sm text-muted-foreground">
+              Sin movimientos registrados.
+            </p>
+          ) : (
+            <ol className="relative space-y-4 border-l border-border pl-6">
+              {op.movements.map((m) => {
+                const isReturn = m.type === "RETURN";
+                const isLoss = m.type === "LOSS";
+                const color = isReturn
+                  ? "bg-[hsl(var(--success))]"
+                  : isLoss
+                    ? "bg-destructive"
+                    : "bg-gold";
+                return (
+                  <li key={m.id} className="relative">
+                    <span
+                      className={`absolute -left-[31px] mt-1 size-3 rounded-full ${color} ring-4 ring-background`}
+                    />
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-medium">
+                          {MOVEMENT_TYPE_LABELS[m.type] ?? m.type}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {m.description ?? "—"}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <p
+                          className={`font-medium tabular ${
+                            isReturn
+                              ? "text-[hsl(var(--success))]"
+                              : isLoss
+                                ? "text-destructive"
+                                : ""
+                          }`}
+                        >
+                          {isLoss ? "−" : isReturn ? "+" : ""}
+                          {formatCurrency(m.amount)}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {formatDateTime(m.date)}
+                        </p>
+                      </div>
+                    </div>
+                  </li>
+                );
+              })}
+            </ol>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function Stat({
+  icon: Icon,
+  label,
+  value,
+  hint,
+}: {
+  icon: any;
+  label: string;
+  value: string;
+  hint?: string;
+}) {
+  return (
+    <Card className="p-4">
+      <div className="mb-2 flex size-9 items-center justify-center rounded-lg bg-gold/10 text-gold">
+        <Icon className="size-5" />
+      </div>
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p className="font-display text-lg font-semibold tabular">{value}</p>
+      {hint && <p className="mt-0.5 text-xs text-muted-foreground">{hint}</p>}
+    </Card>
+  );
+}
+
+function Info({
+  icon: Icon,
+  label,
+  value,
+}: {
+  icon: any;
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <Icon className="size-4 shrink-0 text-muted-foreground" />
+      <div className="min-w-0 flex-1">
+        <p className="text-xs text-muted-foreground">{label}</p>
+        <p className="truncate text-sm font-medium">{value}</p>
+      </div>
+    </div>
+  );
+}

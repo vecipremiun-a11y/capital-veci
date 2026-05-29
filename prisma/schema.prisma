@@ -34,7 +34,8 @@ model User {
   investor   Investor? @relation(fields: [investorId], references: [id], onDelete: SetNull)
   investorId String?   @unique
 
-  auditLogs AuditLog[]
+  auditLogs              AuditLog[]
+  responsibleOperations  Operation[] @relation("OperationResponsible")
 }
 
 // ---------------------------------------------------------
@@ -62,6 +63,8 @@ model Investor {
   contracts Contract[]
   payments  Payment[]
   documents Document[]
+
+  operationParticipations OperationParticipant[]
 }
 
 // ---------------------------------------------------------
@@ -153,26 +156,82 @@ model Payment {
 
 // ---------------------------------------------------------
 //  Operaciones comerciales
+//
+//  Una Operation representa EN QUÉ se está usando el dinero
+//  administrado (compra de mercadería, préstamo, software, etc).
+//
+//  Flujo financiero del dinero:
+//    - Al CREAR: capitalUsed sale de la liquidez disponible y
+//      pasa a "capital comprometido" (sumado por status en metrics).
+//      Se crea un CapitalMovement tipo COMMITTED para trazabilidad.
+//    - Al FINALIZAR: returnAmount vuelve a la liquidez. El profit
+//      (returnAmount - capitalUsed) se reparte pro rata entre
+//      los participantes y la empresa. Se crea movement RETURN.
+//    - En PÉRDIDA: la diferencia no recuperada queda como OUTFLOW
+//      y baja el capital total administrado.
 // ---------------------------------------------------------
 model Operation {
   id             String    @id @default(cuid())
   code           String    @unique
   name           String
   description    String?
+  // MINIMARKET | LOANS | BARBERSHOP | SOFTWARE | CLEANING | IMPORTS | STOCK | COMMERCIAL | EXPANSION
+  category       String    @default("COMMERCIAL")
+  // Negocio o sucursal asociado (texto libre)
+  business       String?
+  // Usuario staff responsable de seguir la operación
+  responsibleId  String?
+  responsible    User?     @relation("OperationResponsible", fields: [responsibleId], references: [id], onDelete: SetNull)
+
   capitalUsed    Float     @default(0)
+  // % esperado anualizado (informativo)
   expectedReturn Float     @default(0)
+  // % real, calculado al finalizar = (returnAmount - capitalUsed) / capitalUsed * 100
   actualReturn   Float?
-  // ACTIVE | FINISHED | RISK | PAUSED
+  // Monto bruto devuelto al finalizar (capital + utilidad o recuperado parcial)
+  returnAmount   Float?
+  // Utilidad o pérdida = returnAmount - capitalUsed (negativo si LOSS)
+  profit         Float?
+
+  // ACTIVE | FINISHED | RISK | PAUSED | LOSS
   status         String    @default("ACTIVE")
   // LOW | MEDIUM | HIGH
   riskLevel      String    @default("MEDIUM")
   startDate      DateTime
   endDate        DateTime?
+  // Cuándo se cerró efectivamente (FINISHED o LOSS)
+  closedAt       DateTime?
   result         String?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
-  movements CapitalMovement[]
+  movements    CapitalMovement[]
+  participants OperationParticipant[]
+}
+
+// ---------------------------------------------------------
+//  Participaciones de inversionistas en una operación
+//
+//  Un inversionista puede aportar parte de su capital a una
+//  operación específica. Al finalizar con utilidad, recibe su
+//  parte proporcional. Al cerrar con pérdida, la pérdida se
+//  reparte igualmente pro rata.
+// ---------------------------------------------------------
+model OperationParticipant {
+  id           String    @id @default(cuid())
+  operation    Operation @relation(fields: [operationId], references: [id], onDelete: Cascade)
+  operationId  String
+  investor     Investor  @relation(fields: [investorId], references: [id], onDelete: Cascade)
+  investorId   String
+  // Aporte de este inversionista a la operación
+  amount       Float
+  // Monto devuelto a este inversionista al cerrar la operación
+  returnAmount Float?
+  // Utilidad/pérdida del inversionista (returnAmount - amount)
+  profit       Float?
+  createdAt    DateTime  @default(now())
+
+  @@unique([operationId, investorId])
 }
 
 // ---------------------------------------------------------
