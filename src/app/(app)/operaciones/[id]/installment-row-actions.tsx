@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { Check, Undo2, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -92,11 +92,12 @@ function CollectDialog({
   const [value, setValue] = useState<number>(remaining);
   const [pending, start] = useTransition();
 
-  // Re-sincroniza el valor por defecto cada vez que se abre.
-  function handleOpen(o: boolean) {
-    if (o) setValue(remaining);
-    onOpenChange(o);
-  }
+  // El modal se abre desde un botón externo (setOpen(true)), por lo que Radix
+  // no dispara onOpenChange al abrir. Reseteamos el monto al saldo cada vez que
+  // el modal pasa a abierto (o si el saldo cambió tras un abono previo).
+  useEffect(() => {
+    if (open) setValue(remaining);
+  }, [open, remaining]);
 
   const excedente = Math.max(value - remaining, 0);
 
@@ -124,7 +125,7 @@ function CollectDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={handleOpen}>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Registrar cobro — Cuota #{sequence}</DialogTitle>

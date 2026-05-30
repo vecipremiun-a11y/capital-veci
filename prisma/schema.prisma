@@ -222,6 +222,7 @@ model Operation {
   movements    CapitalMovement[]
   participants OperationParticipant[]
   installments LoanInstallment[]
+  loanPayments LoanPayment[]
 }
 
 // ---------------------------------------------------------
@@ -252,6 +253,29 @@ model LoanInstallment {
 
   @@index([operationId])
   @@index([dueDate, status])
+}
+
+// ---------------------------------------------------------
+//  Libro de cobros de un préstamo diario (historial de abonos)
+//
+//  Cada LoanPayment es UN evento de cobro: registra cuánto se
+//  cobró, cuándo (fecha + hora), con qué método y QUÉ cuotas
+//  cubrió (allocations: JSON con el desglose por cuota). Sirve
+//  para demostrarle al deudor cómo se fueron haciendo los pagos
+//  en partes, incluso cuando un pago cubre varias cuotas.
+// ---------------------------------------------------------
+model LoanPayment {
+  id          String    @id @default(cuid())
+  operation   Operation @relation(fields: [operationId], references: [id], onDelete: Cascade)
+  operationId String
+  // Monto total efectivamente aplicado en este cobro.
+  amount      Float
+  method      String?
+  // JSON: [{ sequence, installmentId, amount }] — a qué cuotas se aplicó.
+  allocations String
+  createdAt   DateTime  @default(now())
+
+  @@index([operationId])
 }
 
 // ---------------------------------------------------------

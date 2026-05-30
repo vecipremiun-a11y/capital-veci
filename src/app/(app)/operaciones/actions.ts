@@ -613,6 +613,9 @@ export async function collectInstallment(
 
   let left = amount;
   const updates: { id: string; paidAmount: number; status: string }[] = [];
+  // Desglose del cobro: a qué cuotas y cuánto se aplicó (para el historial).
+  const allocations: { sequence: number; installmentId: string; amount: number }[] =
+    [];
   for (let i = startIdx; i < all.length && left > 0; i++) {
     const c = all[i];
     const remaining = c.amount - c.paidAmount;
@@ -624,6 +627,7 @@ export async function collectInstallment(
       paidAmount: newPaid,
       status: newPaid >= c.amount ? "PAID" : "PARTIAL",
     });
+    allocations.push({ sequence: c.sequence, installmentId: c.id, amount: apply });
     left -= apply;
   }
 
@@ -631,6 +635,7 @@ export async function collectInstallment(
     return { error: "No hay saldo pendiente desde esta cuota en adelante." };
   }
 
+  const appliedTotal = amount - left;
   const now = new Date();
   await db.$transaction(async (tx) => {
     for (const u of updates) {
@@ -644,13 +649,22 @@ export async function collectInstallment(
         },
       });
     }
+    // Registro del evento de cobro en el libro (historial con fecha + hora).
+    await tx.loanPayment.create({
+      data: {
+        operationId: target.operationId,
+        amount: appliedTotal,
+        method,
+        allocations: JSON.stringify(allocations),
+      },
+    });
     await tx.auditLog.create({
       data: {
         userId: session.sub,
         action: "PAY",
         entity: "LoanInstallment",
         entityId: id,
-        detail: `Abono ${amount} desde cuota #${target.sequence} · ${updates.length} cuota(s) afectada(s) · método ${method}`,
+        detail: `Abono ${appliedTotal} desde cuota #${target.sequence} · ${updates.length} cuota(s) afectada(s) · método ${method}`,
       },
     });
   });
@@ -669,19 +683,51 @@ export async function revertInstallmentPaid(id: string) {
   const inst = await db.loanInstallment.findUnique({ where: { id } });
   if (!inst) return;
 
-  // Revierte TODOS los abonos de esta cuota (vuelve a pendiente).
-  await db.loanInstallment.update({
-    where: { id },
-    data: { status: "PENDING", paidAmount: 0, paidDate: null, method: null },
+  // Para mantener el libro de cobros coherente, quitamos de cada evento la
+  // parte que se había aplicado a ESTA cuota. Si un evento queda en cero, se
+  // elimina; si no, se ajustan su monto y su desglose.
+  const events = await db.loanPayment.findMany({
+    where: { operationId: inst.operationId },
   });
-  await db.auditLog.create({
-    data: {
-      userId: session.sub,
-      action: "REVERT",
-      entity: "LoanInstallment",
-      entityId: id,
-      detail: `Cuota #${inst.sequence} revertida (abonos eliminados)`,
-    },
+
+  await db.$transaction(async (tx) => {
+    for (const ev of events) {
+      let allocs: { sequence: number; installmentId: string; amount: number }[];
+      try {
+        allocs = JSON.parse(ev.allocations);
+      } catch {
+        continue;
+      }
+      if (!allocs.some((a) => a.installmentId === id)) continue;
+      const remainingAllocs = allocs.filter((a) => a.installmentId !== id);
+      const newAmount = remainingAllocs.reduce((s, a) => s + a.amount, 0);
+      if (newAmount <= 0) {
+        await tx.loanPayment.delete({ where: { id: ev.id } });
+      } else {
+        await tx.loanPayment.update({
+          where: { id: ev.id },
+          data: {
+            amount: newAmount,
+            allocations: JSON.stringify(remainingAllocs),
+          },
+        });
+      }
+    }
+
+    // Revierte TODOS los abonos de esta cuota (vuelve a pendiente).
+    await tx.loanInstallment.update({
+      where: { id },
+      data: { status: "PENDING", paidAmount: 0, paidDate: null, method: null },
+    });
+    await tx.auditLog.create({
+      data: {
+        userId: session.sub,
+        action: "REVERT",
+        entity: "LoanInstallment",
+        entityId: id,
+        detail: `Cuota #${inst.sequence} revertida (abonos eliminados del historial)`,
+      },
+    });
   });
 
   revalidatePath("/operaciones/cobros");

@@ -11,6 +11,7 @@ import {
   Coins,
   Phone,
   PiggyBank,
+  Receipt,
   TrendingDown,
   TrendingUp,
   User as UserIcon,
@@ -50,6 +51,12 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  Tabs,
+  TabsList,
+  TabsTrigger,
+  TabsContent,
+} from "@/components/ui/tabs";
 import { OperationActions } from "./operation-actions";
 
 export const metadata: Metadata = { title: "Operación" };
@@ -70,6 +77,7 @@ export default async function OperationDetail({
       },
       movements: { orderBy: { date: "asc" } },
       installments: { orderBy: { sequence: "asc" } },
+      loanPayments: { orderBy: { createdAt: "desc" } },
     },
   });
 
@@ -201,14 +209,14 @@ export default async function OperationDetail({
         />
       </div>
 
-      {/* Cobranza diaria */}
+      {/* Cobro diario — pestañas: Cobranza diaria + Historial de cobros */}
       {op.isDailyLoan && (
         <Card>
           <CardHeader className="flex-row items-start justify-between gap-3">
             <div className="flex items-center gap-2">
               <CalendarClock className="size-5 text-gold" />
               <div>
-                <CardTitle>Cobranza diaria</CardTitle>
+                <CardTitle>Cobro diario</CardTitle>
                 <CardDescription>
                   {op.borrowerName ? (
                     <span className="inline-flex items-center gap-2">
@@ -220,7 +228,7 @@ export default async function OperationDetail({
                       )}
                     </span>
                   ) : (
-                    "Calendario de cuotas a cobrar."
+                    "Calendario de cuotas e historial de pagos."
                   )}
                 </CardDescription>
               </div>
@@ -231,106 +239,192 @@ export default async function OperationDetail({
               </Badge>
             )}
           </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              <Stat
-                icon={Coins}
-                label="Total a cobrar"
-                value={formatCurrency(totalToCollect)}
-                hint={`${installments.length} cuotas`}
-              />
-              <Stat
-                icon={CheckCircle2}
-                label="Cobrado"
-                value={formatCurrency(collected)}
-                hint={`${paidCount}/${installments.length} cuotas`}
-              />
-              <Stat
-                icon={Wallet}
-                label="Pendiente"
-                value={formatCurrency(pending)}
-              />
-              <Stat
-                icon={TrendingDown}
-                label="Atrasado"
-                value={formatCurrency(overdue)}
-              />
-            </div>
+          <CardContent>
+            <Tabs defaultValue="cobranza">
+              <TabsList>
+                <TabsTrigger value="cobranza">
+                  <CalendarClock className="size-4" /> Cobranza diaria
+                </TabsTrigger>
+                <TabsTrigger value="historial">
+                  <Receipt className="size-4" /> Historial de cobros
+                  {op.loanPayments.length > 0 && (
+                    <span className="rounded-full bg-gold/20 px-1.5 text-xs tabular">
+                      {op.loanPayments.length}
+                    </span>
+                  )}
+                </TabsTrigger>
+              </TabsList>
 
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-12">#</TableHead>
-                  <TableHead>Vencimiento</TableHead>
-                  <TableHead className="text-right">Monto</TableHead>
-                  <TableHead className="text-right">Cobrado</TableHead>
-                  <TableHead className="text-right">Saldo</TableHead>
-                  <TableHead>Estado</TableHead>
-                  <TableHead className="w-32 text-right">Acción</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {installments.map((c) => {
-                  const remaining = c.amount - c.paidAmount;
-                  const fullyPaid = remaining <= 0;
-                  const isOverdue = !fullyPaid && c.dueDate < startOfToday;
-                  const displayStatus = isOverdue
-                    ? "OVERDUE"
-                    : fullyPaid
-                      ? "PAID"
-                      : c.paidAmount > 0
-                        ? "PARTIAL"
-                        : "PENDING";
-                  return (
-                    <TableRow key={c.id}>
-                      <TableCell className="text-muted-foreground">
-                        {c.sequence}
-                      </TableCell>
-                      <TableCell className="text-sm">
-                        <p>{formatDate(c.dueDate)}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {c.paidDate
-                            ? `Últ. abono ${formatDate(c.paidDate)}`
-                            : relativeDays(c.dueDate)}
-                        </p>
-                      </TableCell>
-                      <TableCell className="text-right font-medium tabular">
-                        {formatCurrency(c.amount)}
-                      </TableCell>
-                      <TableCell className="text-right tabular text-[hsl(var(--success))]">
-                        {c.paidAmount > 0 ? formatCurrency(c.paidAmount) : "—"}
-                      </TableCell>
-                      <TableCell className="text-right tabular text-muted-foreground">
-                        {remaining > 0 ? formatCurrency(remaining) : "—"}
-                      </TableCell>
-                      <TableCell>
-                        <StatusBadge status={displayStatus} />
-                      </TableCell>
-                      <TableCell className="text-right">
-                        {!isClosed && (
-                          <InstallmentRowActions
-                            id={c.id}
-                            sequence={c.sequence}
-                            amount={c.amount}
-                            paidAmount={c.paidAmount}
-                          />
-                        )}
-                      </TableCell>
+              {/* Pestaña: Cobranza diaria (KPIs + calendario de cuotas) */}
+              <TabsContent value="cobranza" className="space-y-4">
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  <Stat
+                    icon={Coins}
+                    label="Total a cobrar"
+                    value={formatCurrency(totalToCollect)}
+                    hint={`${installments.length} cuotas`}
+                  />
+                  <Stat
+                    icon={CheckCircle2}
+                    label="Cobrado"
+                    value={formatCurrency(collected)}
+                    hint={`${paidCount}/${installments.length} cuotas`}
+                  />
+                  <Stat
+                    icon={Wallet}
+                    label="Pendiente"
+                    value={formatCurrency(pending)}
+                  />
+                  <Stat
+                    icon={TrendingDown}
+                    label="Atrasado"
+                    value={formatCurrency(overdue)}
+                  />
+                </div>
+
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-12">#</TableHead>
+                      <TableHead>Vencimiento</TableHead>
+                      <TableHead className="text-right">Monto</TableHead>
+                      <TableHead className="text-right">Cobrado</TableHead>
+                      <TableHead className="text-right">Saldo</TableHead>
+                      <TableHead>Estado</TableHead>
+                      <TableHead className="w-32 text-right">Acción</TableHead>
                     </TableRow>
-                  );
-                })}
-                {installments.length === 0 && (
-                  <TableRow>
-                    <TableCell
-                      colSpan={7}
-                      className="py-8 text-center text-muted-foreground"
-                    >
-                      Sin cuotas generadas.
-                    </TableCell>
-                  </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {installments.map((c) => {
+                      const remaining = c.amount - c.paidAmount;
+                      const fullyPaid = remaining <= 0;
+                      const isOverdue = !fullyPaid && c.dueDate < startOfToday;
+                      const displayStatus = isOverdue
+                        ? "OVERDUE"
+                        : fullyPaid
+                          ? "PAID"
+                          : c.paidAmount > 0
+                            ? "PARTIAL"
+                            : "PENDING";
+                      return (
+                        <TableRow key={c.id}>
+                          <TableCell className="text-muted-foreground">
+                            {c.sequence}
+                          </TableCell>
+                          <TableCell className="text-sm">
+                            <p>{formatDate(c.dueDate)}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {c.paidDate
+                                ? `Últ. abono ${formatDate(c.paidDate)}`
+                                : relativeDays(c.dueDate)}
+                            </p>
+                          </TableCell>
+                          <TableCell className="text-right font-medium tabular">
+                            {formatCurrency(c.amount)}
+                          </TableCell>
+                          <TableCell className="text-right tabular text-[hsl(var(--success))]">
+                            {c.paidAmount > 0
+                              ? formatCurrency(c.paidAmount)
+                              : "—"}
+                          </TableCell>
+                          <TableCell className="text-right tabular text-muted-foreground">
+                            {remaining > 0 ? formatCurrency(remaining) : "—"}
+                          </TableCell>
+                          <TableCell>
+                            <StatusBadge status={displayStatus} />
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {!isClosed && (
+                              <InstallmentRowActions
+                                id={c.id}
+                                sequence={c.sequence}
+                                amount={c.amount}
+                                paidAmount={c.paidAmount}
+                              />
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                    {installments.length === 0 && (
+                      <TableRow>
+                        <TableCell
+                          colSpan={7}
+                          className="py-8 text-center text-muted-foreground"
+                        >
+                          Sin cuotas generadas.
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </TabsContent>
+
+              {/* Pestaña: Historial de cobros (libro de abonos) */}
+              <TabsContent value="historial">
+                {op.loanPayments.length === 0 ? (
+                  <p className="py-10 text-center text-sm text-muted-foreground">
+                    Aún no hay cobros registrados. Cada pago que registres
+                    aparecerá aquí con su fecha, hora y las cuotas que cubrió.
+                  </p>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Fecha y hora</TableHead>
+                        <TableHead className="text-right">Monto</TableHead>
+                        <TableHead>Cubrió</TableHead>
+                        <TableHead>Método</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {op.loanPayments.map((ev) => {
+                        let allocs: {
+                          sequence: number;
+                          installmentId: string;
+                          amount: number;
+                        }[] = [];
+                        try {
+                          allocs = JSON.parse(ev.allocations);
+                        } catch {
+                          allocs = [];
+                        }
+                        return (
+                          <TableRow key={ev.id}>
+                            <TableCell className="text-sm">
+                              {formatDateTime(ev.createdAt)}
+                            </TableCell>
+                            <TableCell className="text-right font-medium tabular text-[hsl(var(--success))]">
+                              {formatCurrency(ev.amount)}
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex flex-wrap gap-1.5">
+                                {allocs.map((a) => (
+                                  <span
+                                    key={a.installmentId}
+                                    className="rounded border border-border bg-card/60 px-2 py-0.5 text-xs text-muted-foreground"
+                                  >
+                                    Cuota #{a.sequence} · {formatCurrency(a.amount)}
+                                  </span>
+                                ))}
+                                {allocs.length === 0 && (
+                                  <span className="text-xs text-muted-foreground">
+                                    —
+                                  </span>
+                                )}
+                              </div>
+                            </TableCell>
+                            <TableCell className="text-muted-foreground text-sm">
+                              {ev.method ?? "—"}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
                 )}
-              </TableBody>
-            </Table>
+              </TabsContent>
+            </Tabs>
           </CardContent>
         </Card>
       )}
