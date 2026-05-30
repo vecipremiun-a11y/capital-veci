@@ -202,11 +202,54 @@ model Operation {
   // Cuándo se cerró efectivamente (FINISHED o LOSS)
   closedAt       DateTime?
   result         String?
+
+  // --- Cobro diario (préstamos en cuotas diarias) ---
+  // Si está activo, la operación genera un calendario de cuotas (LoanInstallment).
+  // El dinero recaudado SOLO se registra como cobranza; la liquidez se libera
+  // recién al finalizar la operación (no por cuota).
+  isDailyLoan     Boolean @default(false)
+  // N° de cuotas/días de cobro (ej. 24, 20, 30)
+  dailyTermDays   Int?
+  // CSV de los días de la semana en que SÍ se cobra (0=Dom … 6=Sáb), ej "1,2,3,4,5,6"
+  collectWeekdays String?
+  // Cliente / deudor al que se le cobra
+  borrowerName    String?
+  borrowerPhone   String?
+
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
   movements    CapitalMovement[]
   participants OperationParticipant[]
+  installments LoanInstallment[]
+}
+
+// ---------------------------------------------------------
+//  Cuotas diarias de un préstamo con cobro diario
+//
+//  Cada LoanInstallment es una cuota a cobrar en una fecha
+//  específica. Es un registro de COBRANZA: marcarla como
+//  cobrada no mueve liquidez por sí sola; el dinero se
+//  consolida al finalizar la operación con el total cobrado.
+// ---------------------------------------------------------
+model LoanInstallment {
+  id          String    @id @default(cuid())
+  operation   Operation @relation(fields: [operationId], references: [id], onDelete: Cascade)
+  operationId String
+  // Número de cuota (1..N)
+  sequence    Int
+  dueDate     DateTime
+  amount      Float
+  // PENDING | PAID | OVERDUE
+  status      String    @default("PENDING")
+  paidDate    DateTime?
+  method      String?
+  notes       String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([operationId])
+  @@index([dueDate, status])
 }
 
 // ---------------------------------------------------------

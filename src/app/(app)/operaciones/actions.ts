@@ -5,6 +5,8 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { requirePermission } from "@/lib/auth";
+import { buildDailyLoanSchedule } from "@/lib/loans";
+import { DEFAULT_COLLECT_WEEKDAYS } from "@/lib/constants";
 
 // =========================================================
 //  Operaciones — Server Actions
@@ -61,6 +63,13 @@ const createSchema = z.object({
   status: z.enum(["ACTIVE", "PAUSED", "RISK"]).default("ACTIVE"),
   // JSON con la lista de participantes inversionistas
   participants: z.string().optional().nullable(),
+  // --- Cobro diario ---
+  isDailyLoan: z.coerce.boolean().optional().default(false),
+  dailyTermDays: z.coerce.number().int().min(1).max(365).optional(),
+  // CSV de días que se cobra, ej "1,2,3,4,5,6"
+  collectWeekdays: z.string().optional().nullable(),
+  borrowerName: z.string().max(120).optional().nullable(),
+  borrowerPhone: z.string().max(40).optional().nullable(),
 });
 
 const finalizeSchema = z.object({
@@ -91,6 +100,16 @@ function addMonths(d: Date, months: number) {
   const r = new Date(d);
   r.setMonth(r.getMonth() + months);
   return r;
+}
+
+/** Parsea un CSV de días de la semana ("1,2,3,4,5,6") a number[] válido (0–6). */
+function parseWeekdays(raw: string | null | undefined): number[] {
+  if (!raw) return [...DEFAULT_COLLECT_WEEKDAYS];
+  const days = raw
+    .split(",")
+    .map((s) => Number(s.trim()))
+    .filter((n) => Number.isInteger(n) && n >= 0 && n <= 6);
+  return days.length > 0 ? Array.from(new Set(days)) : [...DEFAULT_COLLECT_WEEKDAYS];
 }
 
 function parseParticipants(raw: string | null | undefined) {
@@ -141,6 +160,11 @@ export async function createOperation(
     riskLevel: formData.get("riskLevel"),
     status: formData.get("status") || "ACTIVE",
     participants: formData.get("participants"),
+    isDailyLoan: formData.get("isDailyLoan") === "true",
+    dailyTermDays: formData.get("dailyTermDays") || undefined,
+    collectWeekdays: formData.get("collectWeekdays"),
+    borrowerName: formData.get("borrowerName"),
+    borrowerPhone: formData.get("borrowerPhone"),
   });
 
   if (!parsed.success) {
@@ -168,7 +192,31 @@ export async function createOperation(
   const startDate = new Date(data.startDate);
   const endDate = addMonths(startDate, data.durationMonths);
 
-  // Una sola transacción: operación + participantes + movimiento + log
+  // --- Cobro diario: prepara el calendario de cuotas (si aplica) ---
+  // El total a cobrar es plano: capital × (1 + retorno%/100), igual que el
+  // preview del formulario. El dinero recaudado se registra como cobranza;
+  // la liquidez se libera recién al finalizar la operación.
+  const isDailyLoan = data.isDailyLoan === true;
+  const collectWeekdays = parseWeekdays(data.collectWeekdays);
+  const termDays = data.dailyTermDays ?? 0;
+  const schedule =
+    isDailyLoan && termDays > 0
+      ? buildDailyLoanSchedule({
+          capital: data.capitalUsed,
+          returnPct: data.expectedReturn,
+          startDate,
+          termDays,
+          collectWeekdays,
+        })
+      : null;
+
+  if (isDailyLoan && (!schedule || schedule.installments.length === 0)) {
+    return {
+      error: "Para un préstamo con cobro diario indica un número de días válido.",
+    };
+  }
+
+  // Una sola transacción: operación + participantes + movimiento + cuotas + log
   const operation = await db.$transaction(async (tx) => {
     const op = await tx.operation.create({
       data: {
@@ -184,8 +232,26 @@ export async function createOperation(
         endDate,
         riskLevel: data.riskLevel,
         status: data.status,
+        isDailyLoan,
+        dailyTermDays: isDailyLoan ? termDays : null,
+        collectWeekdays: isDailyLoan ? collectWeekdays.join(",") : null,
+        borrowerName: isDailyLoan ? data.borrowerName || null : null,
+        borrowerPhone: isDailyLoan ? data.borrowerPhone || null : null,
       },
     });
+
+    // Calendario de cobro diario: una cuota por día hábil.
+    if (schedule) {
+      await tx.loanInstallment.createMany({
+        data: schedule.installments.map((c) => ({
+          operationId: op.id,
+          sequence: c.sequence,
+          dueDate: c.dueDate,
+          amount: c.amount,
+          status: "PENDING",
+        })),
+      });
+    }
 
     if (participants.length > 0) {
       await tx.operationParticipant.createMany({
@@ -494,4 +560,61 @@ export async function setOperationStatus(id: string, status: string) {
   revalidatePath(`/operaciones/${id}`);
   revalidatePath("/operaciones");
   revalidatePath("/dashboard");
+}
+
+// =========================================================
+//  COBRO DIARIO — Marcar / revertir cobro de una cuota
+//
+//  Es un registro de COBRANZA: marcar una cuota como cobrada
+//  NO mueve liquidez por sí solo. El dinero se consolida al
+//  finalizar la operación con el total efectivamente cobrado
+//  (mismo modelo que se acordó: la liquidez se libera al cierre).
+// =========================================================
+export async function markInstallmentPaid(
+  id: string,
+  method = "Efectivo",
+) {
+  const session = await requirePermission("operations");
+  const inst = await db.loanInstallment.findUnique({ where: { id } });
+  if (!inst || inst.status === "PAID") return;
+
+  await db.loanInstallment.update({
+    where: { id },
+    data: { status: "PAID", paidDate: new Date(), method },
+  });
+  await db.auditLog.create({
+    data: {
+      userId: session.sub,
+      action: "PAY",
+      entity: "LoanInstallment",
+      entityId: id,
+      detail: `Cuota #${inst.sequence} cobrada (${method})`,
+    },
+  });
+
+  revalidatePath("/operaciones/cobros");
+  revalidatePath(`/operaciones/${inst.operationId}`);
+}
+
+export async function revertInstallmentPaid(id: string) {
+  const session = await requirePermission("operations");
+  const inst = await db.loanInstallment.findUnique({ where: { id } });
+  if (!inst) return;
+
+  await db.loanInstallment.update({
+    where: { id },
+    data: { status: "PENDING", paidDate: null, method: null },
+  });
+  await db.auditLog.create({
+    data: {
+      userId: session.sub,
+      action: "REVERT",
+      entity: "LoanInstallment",
+      entityId: id,
+      detail: `Cuota #${inst.sequence} revertida`,
+    },
+  });
+
+  revalidatePath("/operaciones/cobros");
+  revalidatePath(`/operaciones/${inst.operationId}`);
 }

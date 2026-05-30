@@ -141,6 +141,30 @@ export const RISK_LABELS: Record<string, string> = {
   HIGH: "Alto",
 };
 
+/** Estados de una cuota de cobro diario (LoanInstallment). */
+export const INSTALLMENT_STATUS_LABELS: Record<string, string> = {
+  PENDING: "Pendiente",
+  PAID: "Cobrado",
+  OVERDUE: "Atrasado",
+};
+
+/** Etiquetas de días de la semana, indexadas por getDay() (0=Dom … 6=Sáb). */
+export const WEEKDAY_LABELS = [
+  "Domingo",
+  "Lunes",
+  "Martes",
+  "Miércoles",
+  "Jueves",
+  "Viernes",
+  "Sábado",
+] as const;
+
+/** Abreviaturas de días, indexadas por getDay(). */
+export const WEEKDAY_SHORT = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"] as const;
+
+/** Días por defecto en que se cobra: lunes a sábado (sin domingo). */
+export const DEFAULT_COLLECT_WEEKDAYS = [1, 2, 3, 4, 5, 6] as const;
+
 export const MOVEMENT_TYPE_LABELS: Record<string, string> = {
   INFLOW: "Ingreso de capital",
   OUTFLOW: "Egreso",

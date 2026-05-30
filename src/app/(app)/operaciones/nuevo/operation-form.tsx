@@ -5,6 +5,7 @@ import { useFormStatus } from "react-dom";
 import Link from "next/link";
 import {
   AlertCircle,
+  CalendarClock,
   Loader2,
   Plus,
   Trash2,
@@ -19,11 +20,15 @@ import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
 import {
   OPERATION_CATEGORY_OPTIONS,
   RISK_LABELS,
+  WEEKDAY_SHORT,
+  DEFAULT_COLLECT_WEEKDAYS,
 } from "@/lib/constants";
-import { formatCurrency } from "@/lib/format";
+import { buildDailyLoanSchedule } from "@/lib/loans";
+import { formatCurrency, formatDate } from "@/lib/format";
 
 const selectClass =
   "flex h-10 w-full rounded-md border border-input bg-background/50 px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring";
@@ -55,11 +60,43 @@ export function OperationForm({
   );
   const fe = state.fieldErrors ?? {};
 
+  const today = new Date().toISOString().slice(0, 10);
+
   // Estado del formulario para el preview financiero en vivo
   const [capitalUsed, setCapitalUsed] = useState(0);
   const [expectedReturn, setExpectedReturn] = useState(20);
   const [duration, setDuration] = useState(3);
+  const [startDate, setStartDate] = useState(today);
   const [participants, setParticipants] = useState<Participant[]>([]);
+
+  // Cobro diario (préstamos en cuotas)
+  const [isDailyLoan, setIsDailyLoan] = useState(false);
+  const [termDays, setTermDays] = useState(24);
+  const [weekdays, setWeekdays] = useState<number[]>([
+    ...DEFAULT_COLLECT_WEEKDAYS,
+  ]);
+  const [borrowerName, setBorrowerName] = useState("");
+  const [borrowerPhone, setBorrowerPhone] = useState("");
+
+  function toggleWeekday(day: number) {
+    setWeekdays((prev) =>
+      prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day],
+    );
+  }
+
+  // Calendario de cobro diario en vivo (espejo de lo que se guardará).
+  const dailySchedule = useMemo(() => {
+    if (!isDailyLoan || capitalUsed <= 0 || termDays <= 0) return null;
+    const [y, m, d] = startDate.split("-").map(Number);
+    if (!y || !m || !d) return null;
+    return buildDailyLoanSchedule({
+      capital: capitalUsed,
+      returnPct: expectedReturn,
+      startDate: new Date(y, m - 1, d),
+      termDays,
+      collectWeekdays: weekdays,
+    });
+  }, [isDailyLoan, capitalUsed, expectedReturn, termDays, weekdays, startDate]);
 
   const investorsById = useMemo(
     () => new Map(investors.map((i) => [i.id, i])),
@@ -83,8 +120,6 @@ export function OperationForm({
       prev.map((p, i) => (i === idx ? { ...p, ...patch } : p)),
     );
   }
-
-  const today = new Date().toISOString().slice(0, 10);
 
   return (
     <form action={action} className="grid gap-6 lg:grid-cols-3">
@@ -236,7 +271,8 @@ export function OperationForm({
                 id="startDate"
                 name="startDate"
                 type="date"
-                defaultValue={today}
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
                 required
               />
             </div>
@@ -254,6 +290,162 @@ export function OperationForm({
                 <option value="RISK">En riesgo</option>
               </select>
             </div>
+          </CardContent>
+        </Card>
+
+        {/* Cobro diario (préstamos en cuotas) */}
+        <Card className={isDailyLoan ? "border-gold/30" : undefined}>
+          <CardHeader className="flex-row items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <CalendarClock className="size-5 text-gold" />
+              <CardTitle>Cobro diario</CardTitle>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground">
+                {isDailyLoan ? "Activado" : "Desactivado"}
+              </span>
+              <Switch
+                checked={isDailyLoan}
+                onCheckedChange={setIsDailyLoan}
+                aria-label="Activar cobro diario"
+              />
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {!isDailyLoan ? (
+              <p className="text-sm text-muted-foreground">
+                Actívalo para cobrar este préstamo en cuotas diarias. El total
+                (capital + interés) se divide en los días que elijas y se genera
+                el calendario de cobranza automáticamente.
+              </p>
+            ) : (
+              <>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="dailyTermDays">Días de cobro</Label>
+                    <Input
+                      id="dailyTermDays"
+                      type="number"
+                      min="1"
+                      max="365"
+                      value={termDays || ""}
+                      onChange={(e) => setTermDays(Number(e.target.value))}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      En cuántas cuotas diarias se cobra el total.
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="borrowerName">Cliente / deudor</Label>
+                    <Input
+                      id="borrowerName"
+                      value={borrowerName}
+                      onChange={(e) => setBorrowerName(e.target.value)}
+                      placeholder="Ej. Juan Pérez"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="borrowerPhone">Teléfono del deudor</Label>
+                    <Input
+                      id="borrowerPhone"
+                      value={borrowerPhone}
+                      onChange={(e) => setBorrowerPhone(e.target.value)}
+                      placeholder="Ej. +56 9 1234 5678"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Días que se cobra</Label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {[1, 2, 3, 4, 5, 6, 0].map((day) => {
+                      const on = weekdays.includes(day);
+                      return (
+                        <button
+                          key={day}
+                          type="button"
+                          onClick={() => toggleWeekday(day)}
+                          className={`rounded-md border px-3 py-1.5 text-sm transition-colors ${
+                            on
+                              ? "border-gold bg-gold/10 text-gold"
+                              : "border-border text-muted-foreground hover:bg-muted/40"
+                          }`}
+                        >
+                          {WEEKDAY_SHORT[day]}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Desmarca los días que no cobras (ej. domingos). Las cuotas
+                    saltan esos días.
+                  </p>
+                </div>
+
+                {/* Vista previa del calendario */}
+                {dailySchedule && dailySchedule.installments.length > 0 ? (
+                  <div className="rounded-lg border border-gold/30 bg-gold/[0.03] p-3">
+                    <div className="grid gap-2 sm:grid-cols-3">
+                      <PreviewMini
+                        label="Total a cobrar"
+                        value={formatCurrency(dailySchedule.total)}
+                      />
+                      <PreviewMini
+                        label="Cuota diaria"
+                        value={formatCurrency(dailySchedule.dailyAmount)}
+                        accent
+                      />
+                      <PreviewMini
+                        label="Días de cobro"
+                        value={`${dailySchedule.daysCount}`}
+                      />
+                    </div>
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      Primer cobro {formatDate(dailySchedule.firstDate)} · último{" "}
+                      {formatDate(dailySchedule.endDate)}. La última cuota ajusta
+                      el redondeo.
+                    </p>
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {dailySchedule.installments.slice(0, 5).map((c) => (
+                        <span
+                          key={c.sequence}
+                          className="rounded border border-border bg-card/60 px-2 py-1 text-xs text-muted-foreground"
+                        >
+                          #{c.sequence} {formatDate(c.dueDate)} ·{" "}
+                          {formatCurrency(c.amount)}
+                        </span>
+                      ))}
+                      {dailySchedule.installments.length > 5 && (
+                        <span className="px-2 py-1 text-xs text-muted-foreground">
+                          +{dailySchedule.installments.length - 5} más…
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    Ingresa capital, retorno y días de cobro para ver el
+                    calendario.
+                  </p>
+                )}
+
+                {/* Campos ocultos enviados al servidor */}
+                <input type="hidden" name="dailyTermDays" value={termDays || ""} />
+                <input
+                  type="hidden"
+                  name="collectWeekdays"
+                  value={weekdays.join(",")}
+                />
+                <input type="hidden" name="borrowerName" value={borrowerName} />
+                <input type="hidden" name="borrowerPhone" value={borrowerPhone} />
+              </>
+            )}
+            {/* Siempre presente para que el servidor sepa el modo */}
+            <input
+              type="hidden"
+              name="isDailyLoan"
+              value={isDailyLoan ? "true" : "false"}
+            />
           </CardContent>
         </Card>
 
@@ -414,12 +606,41 @@ export function OperationForm({
                 <li>Sube el capital comprometido en {formatCurrency(capitalUsed)}</li>
                 <li>Se registra un movimiento tipo "Comprometido"</li>
                 <li>Cada participante queda vinculado con su aporte</li>
+                {isDailyLoan && dailySchedule && (
+                  <li>
+                    Se generan {dailySchedule.daysCount} cuotas de{" "}
+                    {formatCurrency(dailySchedule.dailyAmount)} para cobro diario
+                  </li>
+                )}
               </ul>
             </div>
           </CardContent>
         </Card>
       </div>
     </form>
+  );
+}
+
+function PreviewMini({
+  label,
+  value,
+  accent,
+}: {
+  label: string;
+  value: string;
+  accent?: boolean;
+}) {
+  return (
+    <div>
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p
+        className={`font-display text-base font-semibold tabular ${
+          accent ? "text-gold" : ""
+        }`}
+      >
+        {value}
+      </p>
+    </div>
   );
 }
 

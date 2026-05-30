@@ -6,8 +6,10 @@ import {
   Briefcase,
   Building2,
   Calendar,
+  CalendarClock,
   CheckCircle2,
   Coins,
+  Phone,
   PiggyBank,
   TrendingDown,
   TrendingUp,
@@ -20,12 +22,15 @@ import {
   formatDate,
   formatDateTime,
   formatPercent,
+  relativeDays,
 } from "@/lib/format";
 import {
+  INSTALLMENT_STATUS_LABELS,
   MOVEMENT_TYPE_LABELS,
   OPERATION_CATEGORY_LABELS,
   RISK_LABELS,
 } from "@/lib/constants";
+import { InstallmentRowActions } from "./installment-row-actions";
 import { PageHeader } from "@/components/shared/page-header";
 import { StatusBadge, RiskBadge } from "@/components/shared/status-badge";
 import {
@@ -64,6 +69,7 @@ export default async function OperationDetail({
         include: { investor: { select: { id: true, fullName: true } } },
       },
       movements: { orderBy: { date: "asc" } },
+      installments: { orderBy: { sequence: "asc" } },
     },
   });
 
@@ -73,6 +79,22 @@ export default async function OperationDetail({
   const participantsTotal = op.participants.reduce((s, p) => s + p.amount, 0);
   const companyShare = Math.max(op.capitalUsed - participantsTotal, 0);
   const expectedReturnAmount = op.capitalUsed * (1 + op.expectedReturn / 100);
+
+  // Métricas de cobro diario
+  const installments = op.installments;
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+  const totalToCollect = installments.reduce((s, c) => s + c.amount, 0);
+  const collected = installments
+    .filter((c) => c.status === "PAID")
+    .reduce((s, c) => s + c.amount, 0);
+  const overdue = installments
+    .filter((c) => c.status !== "PAID" && c.dueDate < startOfToday)
+    .reduce((s, c) => s + c.amount, 0);
+  const pending = totalToCollect - collected;
+  const paidCount = installments.filter((c) => c.status === "PAID").length;
+  const allPaid =
+    installments.length > 0 && paidCount === installments.length;
 
   return (
     <div className="space-y-6">
@@ -178,6 +200,122 @@ export default async function OperationDetail({
           }
         />
       </div>
+
+      {/* Cobranza diaria */}
+      {op.isDailyLoan && (
+        <Card>
+          <CardHeader className="flex-row items-start justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <CalendarClock className="size-5 text-gold" />
+              <div>
+                <CardTitle>Cobranza diaria</CardTitle>
+                <CardDescription>
+                  {op.borrowerName ? (
+                    <span className="inline-flex items-center gap-2">
+                      <UserIcon className="size-3.5" /> {op.borrowerName}
+                      {op.borrowerPhone && (
+                        <span className="inline-flex items-center gap-1 text-muted-foreground">
+                          <Phone className="size-3.5" /> {op.borrowerPhone}
+                        </span>
+                      )}
+                    </span>
+                  ) : (
+                    "Calendario de cuotas a cobrar."
+                  )}
+                </CardDescription>
+              </div>
+            </div>
+            {allPaid && !isClosed && (
+              <Badge variant="gold" className="shrink-0">
+                Todo cobrado · listo para finalizar
+              </Badge>
+            )}
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <Stat
+                icon={Coins}
+                label="Total a cobrar"
+                value={formatCurrency(totalToCollect)}
+                hint={`${installments.length} cuotas`}
+              />
+              <Stat
+                icon={CheckCircle2}
+                label="Cobrado"
+                value={formatCurrency(collected)}
+                hint={`${paidCount}/${installments.length} cuotas`}
+              />
+              <Stat
+                icon={Wallet}
+                label="Pendiente"
+                value={formatCurrency(pending)}
+              />
+              <Stat
+                icon={TrendingDown}
+                label="Atrasado"
+                value={formatCurrency(overdue)}
+              />
+            </div>
+
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-12">#</TableHead>
+                  <TableHead>Vencimiento</TableHead>
+                  <TableHead className="text-right">Monto</TableHead>
+                  <TableHead>Estado</TableHead>
+                  <TableHead>Cobrado</TableHead>
+                  <TableHead className="w-28 text-right">Acción</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {installments.map((c) => {
+                  const paid = c.status === "PAID";
+                  const isOverdue = !paid && c.dueDate < startOfToday;
+                  const displayStatus = isOverdue ? "OVERDUE" : c.status;
+                  return (
+                    <TableRow key={c.id}>
+                      <TableCell className="text-muted-foreground">
+                        {c.sequence}
+                      </TableCell>
+                      <TableCell className="text-sm">
+                        <p>{formatDate(c.dueDate)}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {relativeDays(c.dueDate)}
+                        </p>
+                      </TableCell>
+                      <TableCell className="text-right font-medium tabular">
+                        {formatCurrency(c.amount)}
+                      </TableCell>
+                      <TableCell>
+                        <StatusBadge status={displayStatus} />
+                      </TableCell>
+                      <TableCell className="text-muted-foreground text-sm">
+                        {formatDate(c.paidDate)}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {!isClosed && (
+                          <InstallmentRowActions id={c.id} paid={paid} />
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+                {installments.length === 0 && (
+                  <TableRow>
+                    <TableCell
+                      colSpan={6}
+                      className="py-8 text-center text-muted-foreground"
+                    >
+                      Sin cuotas generadas.
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid gap-6 lg:grid-cols-3">
         {/* Información lateral */}

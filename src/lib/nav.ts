@@ -111,6 +111,7 @@ export const NAV_SECTIONS: NavSection[] = [
           { label: "Activas", href: "/operaciones?estado=ACTIVE" },
           { label: "Finalizadas", href: "/operaciones?estado=FINISHED" },
           { label: "En riesgo", href: "/operaciones?estado=RISK" },
+          { label: "Cobros del día", href: "/operaciones/cobros" },
           { label: "Rendimiento", href: "/operaciones/rendimiento" },
         ],
       },
