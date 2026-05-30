@@ -80,19 +80,19 @@ export default async function OperationDetail({
   const companyShare = Math.max(op.capitalUsed - participantsTotal, 0);
   const expectedReturnAmount = op.capitalUsed * (1 + op.expectedReturn / 100);
 
-  // Métricas de cobro diario
+  // Métricas de cobro diario (con abonos parciales)
   const installments = op.installments;
   const startOfToday = new Date();
   startOfToday.setHours(0, 0, 0, 0);
   const totalToCollect = installments.reduce((s, c) => s + c.amount, 0);
-  const collected = installments
-    .filter((c) => c.status === "PAID")
-    .reduce((s, c) => s + c.amount, 0);
+  const collected = installments.reduce((s, c) => s + c.paidAmount, 0);
   const overdue = installments
-    .filter((c) => c.status !== "PAID" && c.dueDate < startOfToday)
-    .reduce((s, c) => s + c.amount, 0);
+    .filter((c) => c.amount - c.paidAmount > 0 && c.dueDate < startOfToday)
+    .reduce((s, c) => s + (c.amount - c.paidAmount), 0);
   const pending = totalToCollect - collected;
-  const paidCount = installments.filter((c) => c.status === "PAID").length;
+  const paidCount = installments.filter(
+    (c) => c.amount - c.paidAmount <= 0,
+  ).length;
   const allPaid =
     installments.length > 0 && paidCount === installments.length;
 
@@ -263,16 +263,24 @@ export default async function OperationDetail({
                   <TableHead className="w-12">#</TableHead>
                   <TableHead>Vencimiento</TableHead>
                   <TableHead className="text-right">Monto</TableHead>
+                  <TableHead className="text-right">Cobrado</TableHead>
+                  <TableHead className="text-right">Saldo</TableHead>
                   <TableHead>Estado</TableHead>
-                  <TableHead>Cobrado</TableHead>
-                  <TableHead className="w-28 text-right">Acción</TableHead>
+                  <TableHead className="w-32 text-right">Acción</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {installments.map((c) => {
-                  const paid = c.status === "PAID";
-                  const isOverdue = !paid && c.dueDate < startOfToday;
-                  const displayStatus = isOverdue ? "OVERDUE" : c.status;
+                  const remaining = c.amount - c.paidAmount;
+                  const fullyPaid = remaining <= 0;
+                  const isOverdue = !fullyPaid && c.dueDate < startOfToday;
+                  const displayStatus = isOverdue
+                    ? "OVERDUE"
+                    : fullyPaid
+                      ? "PAID"
+                      : c.paidAmount > 0
+                        ? "PARTIAL"
+                        : "PENDING";
                   return (
                     <TableRow key={c.id}>
                       <TableCell className="text-muted-foreground">
@@ -281,21 +289,31 @@ export default async function OperationDetail({
                       <TableCell className="text-sm">
                         <p>{formatDate(c.dueDate)}</p>
                         <p className="text-xs text-muted-foreground">
-                          {relativeDays(c.dueDate)}
+                          {c.paidDate
+                            ? `Últ. abono ${formatDate(c.paidDate)}`
+                            : relativeDays(c.dueDate)}
                         </p>
                       </TableCell>
                       <TableCell className="text-right font-medium tabular">
                         {formatCurrency(c.amount)}
                       </TableCell>
+                      <TableCell className="text-right tabular text-[hsl(var(--success))]">
+                        {c.paidAmount > 0 ? formatCurrency(c.paidAmount) : "—"}
+                      </TableCell>
+                      <TableCell className="text-right tabular text-muted-foreground">
+                        {remaining > 0 ? formatCurrency(remaining) : "—"}
+                      </TableCell>
                       <TableCell>
                         <StatusBadge status={displayStatus} />
                       </TableCell>
-                      <TableCell className="text-muted-foreground text-sm">
-                        {formatDate(c.paidDate)}
-                      </TableCell>
                       <TableCell className="text-right">
                         {!isClosed && (
-                          <InstallmentRowActions id={c.id} paid={paid} />
+                          <InstallmentRowActions
+                            id={c.id}
+                            sequence={c.sequence}
+                            amount={c.amount}
+                            paidAmount={c.paidAmount}
+                          />
                         )}
                       </TableCell>
                     </TableRow>
@@ -304,7 +322,7 @@ export default async function OperationDetail({
                 {installments.length === 0 && (
                   <TableRow>
                     <TableCell
-                      colSpan={6}
+                      colSpan={7}
                       className="py-8 text-center text-muted-foreground"
                     >
                       Sin cuotas generadas.

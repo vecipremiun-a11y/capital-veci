@@ -73,16 +73,19 @@ export default async function CobrosPage({
     }),
     db.loanInstallment.findMany({
       where: baseWhere,
-      select: { amount: true, dueDate: true, operationId: true },
+      select: { amount: true, paidAmount: true, dueDate: true, operationId: true },
     }),
   ]);
 
+  const rem = (c: { amount: number; paidAmount: number }) =>
+    Math.max(c.amount - c.paidAmount, 0);
+
   const todayTotal = pendingAll
     .filter((c) => c.dueDate >= startOfToday && c.dueDate <= endOfToday)
-    .reduce((s, c) => s + c.amount, 0);
+    .reduce((s, c) => s + rem(c), 0);
   const overdueTotal = pendingAll
     .filter((c) => c.dueDate < startOfToday)
-    .reduce((s, c) => s + c.amount, 0);
+    .reduce((s, c) => s + rem(c), 0);
   const peopleToday = new Set(
     pendingAll
       .filter((c) => c.dueDate <= endOfToday)
@@ -154,7 +157,13 @@ export default async function CobrosPage({
           </TableHeader>
           <TableBody>
             {rows.map((c) => {
+              const remaining = Math.max(c.amount - c.paidAmount, 0);
               const isOverdue = c.dueDate < startOfToday;
+              const status = isOverdue
+                ? "OVERDUE"
+                : c.paidAmount > 0
+                  ? "PARTIAL"
+                  : "PENDING";
               return (
                 <TableRow key={c.id}>
                   <TableCell>
@@ -185,13 +194,23 @@ export default async function CobrosPage({
                     </p>
                   </TableCell>
                   <TableCell className="text-right font-medium tabular">
-                    {formatCurrency(c.amount)}
+                    {formatCurrency(remaining)}
+                    {c.paidAmount > 0 && (
+                      <span className="block text-xs font-normal text-muted-foreground">
+                        de {formatCurrency(c.amount)}
+                      </span>
+                    )}
                   </TableCell>
                   <TableCell>
-                    <StatusBadge status={isOverdue ? "OVERDUE" : "PENDING"} />
+                    <StatusBadge status={status} />
                   </TableCell>
                   <TableCell className="text-right">
-                    <InstallmentRowActions id={c.id} paid={false} />
+                    <InstallmentRowActions
+                      id={c.id}
+                      sequence={c.sequence}
+                      amount={c.amount}
+                      paidAmount={c.paidAmount}
+                    />
                   </TableCell>
                 </TableRow>
               );

@@ -240,7 +240,9 @@ model LoanInstallment {
   sequence    Int
   dueDate     DateTime
   amount      Float
-  // PENDING | PAID | OVERDUE
+  // Monto acumulado efectivamente cobrado (abonos). remaining = amount - paidAmount.
+  paidAmount  Float     @default(0)
+  // PENDING | PARTIAL | PAID | OVERDUE
   status      String    @default("PENDING")
   paidDate    DateTime?
   method      String?

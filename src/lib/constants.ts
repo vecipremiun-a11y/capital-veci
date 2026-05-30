@@ -144,6 +144,7 @@ export const RISK_LABELS: Record<string, string> = {
 /** Estados de una cuota de cobro diario (LoanInstallment). */
 export const INSTALLMENT_STATUS_LABELS: Record<string, string> = {
   PENDING: "Pendiente",
+  PARTIAL: "Parcial",
   PAID: "Cobrado",
   OVERDUE: "Atrasado",
 };

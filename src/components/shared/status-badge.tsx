@@ -4,6 +4,7 @@ import {
   CONTRACT_STATUS_LABELS,
   PAYMENT_STATUS_LABELS,
   OPERATION_STATUS_LABELS,
+  INSTALLMENT_STATUS_LABELS,
   RISK_LABELS,
 } from "@/lib/constants";
 
@@ -25,6 +26,8 @@ const STATUS_VARIANT: Record<string, Variant> = {
   PENDING: "warning",
   OVERDUE: "danger",
   SCHEDULED: "outline",
+  // Cuotas de cobro diario
+  PARTIAL: "gold",
   // Operaciones
   PAUSED: "warning",
   LOSS: "danger",
@@ -41,6 +44,9 @@ const ALL_LABELS: Record<string, string> = {
   ...CONTRACT_STATUS_LABELS,
   ...PAYMENT_STATUS_LABELS,
   ...OPERATION_STATUS_LABELS,
+  // Solo agregamos PARTIAL: el resto (PENDING/PAID/OVERDUE) ya existe y no
+  // queremos pisar la redacción usada en el módulo de Pagos.
+  PARTIAL: INSTALLMENT_STATUS_LABELS.PARTIAL,
 };
 
 export function StatusBadge({ status }: { status: string }) {

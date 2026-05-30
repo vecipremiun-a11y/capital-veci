@@ -563,37 +563,105 @@ export async function setOperationStatus(id: string, status: string) {
 }
 
 // =========================================================
-//  COBRO DIARIO — Marcar / revertir cobro de una cuota
+//  COBRO DIARIO — Registrar abono(s) sobre una cuota
 //
-//  Es un registro de COBRANZA: marcar una cuota como cobrada
-//  NO mueve liquidez por sí solo. El dinero se consolida al
-//  finalizar la operación con el total efectivamente cobrado
-//  (mismo modelo que se acordó: la liquidez se libera al cierre).
+//  Es un registro de COBRANZA: cobrar NO mueve liquidez por sí
+//  solo. El dinero se consolida al finalizar la operación con el
+//  total efectivamente cobrado.
+//
+//  ABONOS PARCIALES + EXCEDENTE EN CASCADA:
+//    • El monto cobrado se aplica primero a la cuota elegida
+//      (hasta completar su saldo) y el excedente "se derrama" a
+//      las cuotas siguientes por orden, una a una.
+//    • Si el abono es menor al saldo, la cuota queda PARTIAL y
+//      se puede seguir abonando otro día.
+//    • Estado por cuota: PAID si paidAmount ≥ amount, PARTIAL si
+//      0 < paidAmount < amount, PENDING si 0.
+//
+//  Devuelve cuánto se aplicó realmente y cuánto sobró (si el monto
+//  excede el saldo total restante de la operación).
 // =========================================================
-export async function markInstallmentPaid(
-  id: string,
-  method = "Efectivo",
-) {
-  const session = await requirePermission("operations");
-  const inst = await db.loanInstallment.findUnique({ where: { id } });
-  if (!inst || inst.status === "PAID") return;
+export interface CollectResult {
+  error?: string;
+  applied?: number;
+  leftover?: number;
+  installmentsTouched?: number;
+}
 
-  await db.loanInstallment.update({
-    where: { id },
-    data: { status: "PAID", paidDate: new Date(), method },
+export async function collectInstallment(
+  id: string,
+  rawAmount: number,
+  method = "Efectivo",
+): Promise<CollectResult> {
+  const session = await requirePermission("operations");
+
+  const amount = Math.round(Number(rawAmount));
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return { error: "Ingresa un monto mayor a 0." };
+  }
+
+  const target = await db.loanInstallment.findUnique({ where: { id } });
+  if (!target) return { error: "Cuota no encontrada." };
+
+  // Todas las cuotas de la operación, en orden, desde la cuota elegida.
+  const all = await db.loanInstallment.findMany({
+    where: { operationId: target.operationId },
+    orderBy: { sequence: "asc" },
   });
-  await db.auditLog.create({
-    data: {
-      userId: session.sub,
-      action: "PAY",
-      entity: "LoanInstallment",
-      entityId: id,
-      detail: `Cuota #${inst.sequence} cobrada (${method})`,
-    },
+  const startIdx = all.findIndex((c) => c.id === id);
+  if (startIdx < 0) return { error: "Cuota no encontrada." };
+
+  let left = amount;
+  const updates: { id: string; paidAmount: number; status: string }[] = [];
+  for (let i = startIdx; i < all.length && left > 0; i++) {
+    const c = all[i];
+    const remaining = c.amount - c.paidAmount;
+    if (remaining <= 0) continue; // ya saldada, derrama a la siguiente
+    const apply = Math.min(left, remaining);
+    const newPaid = c.paidAmount + apply;
+    updates.push({
+      id: c.id,
+      paidAmount: newPaid,
+      status: newPaid >= c.amount ? "PAID" : "PARTIAL",
+    });
+    left -= apply;
+  }
+
+  if (updates.length === 0) {
+    return { error: "No hay saldo pendiente desde esta cuota en adelante." };
+  }
+
+  const now = new Date();
+  await db.$transaction(async (tx) => {
+    for (const u of updates) {
+      await tx.loanInstallment.update({
+        where: { id: u.id },
+        data: {
+          paidAmount: u.paidAmount,
+          status: u.status,
+          paidDate: now,
+          method,
+        },
+      });
+    }
+    await tx.auditLog.create({
+      data: {
+        userId: session.sub,
+        action: "PAY",
+        entity: "LoanInstallment",
+        entityId: id,
+        detail: `Abono ${amount} desde cuota #${target.sequence} · ${updates.length} cuota(s) afectada(s) · método ${method}`,
+      },
+    });
   });
 
   revalidatePath("/operaciones/cobros");
-  revalidatePath(`/operaciones/${inst.operationId}`);
+  revalidatePath(`/operaciones/${target.operationId}`);
+  return {
+    applied: amount - left,
+    leftover: left,
+    installmentsTouched: updates.length,
+  };
 }
 
 export async function revertInstallmentPaid(id: string) {
@@ -601,9 +669,10 @@ export async function revertInstallmentPaid(id: string) {
   const inst = await db.loanInstallment.findUnique({ where: { id } });
   if (!inst) return;
 
+  // Revierte TODOS los abonos de esta cuota (vuelve a pendiente).
   await db.loanInstallment.update({
     where: { id },
-    data: { status: "PENDING", paidDate: null, method: null },
+    data: { status: "PENDING", paidAmount: 0, paidDate: null, method: null },
   });
   await db.auditLog.create({
     data: {
@@ -611,7 +680,7 @@ export async function revertInstallmentPaid(id: string) {
       action: "REVERT",
       entity: "LoanInstallment",
       entityId: id,
-      detail: `Cuota #${inst.sequence} revertida`,
+      detail: `Cuota #${inst.sequence} revertida (abonos eliminados)`,
     },
   });
 
