@@ -24,8 +24,6 @@ export default async function NewContractPage({
       select: {
         id: true,
         fullName: true,
-        expectedReturn: true,
-        investedCapital: true,
       },
     }),
     templateId

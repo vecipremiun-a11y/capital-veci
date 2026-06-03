@@ -17,7 +17,7 @@ export default function NewInvestorPage() {
       </Button>
       <PageHeader
         title="Crear inversionista"
-        description="Registra un nuevo inversionista con sus condiciones de capital y rentabilidad."
+        description="Registra los datos de contacto del inversionista. El capital y la rentabilidad se calculan automáticamente desde sus contratos."
       />
       <InvestorForm />
     </div>

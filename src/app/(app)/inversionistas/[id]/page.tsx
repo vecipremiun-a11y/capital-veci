@@ -6,6 +6,7 @@ import {
   Mail,
   Phone,
   FileSignature,
+  Pencil,
   Wallet,
   TrendingUp,
   CalendarClock,
@@ -152,6 +153,11 @@ export default async function InvestorProfile({
                 defaultEmail={investor.email}
               />
             )}
+            <Button asChild variant="outline" size="sm">
+              <Link href={`/inversionistas/${investor.id}/editar`}>
+                <Pencil /> Editar
+              </Link>
+            </Button>
             <Button asChild variant="gold" size="sm">
               <Link href={`/contratos/nuevo?investor=${investor.id}`}>
                 <FileSignature /> Nuevo contrato

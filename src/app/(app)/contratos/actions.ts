@@ -6,12 +6,14 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { requirePermission } from "@/lib/auth";
 import { buildSchedule, type PaymentFrequency } from "@/lib/payments";
+import { recalcInvestorFinancials } from "@/lib/data/investor-financials";
 
 const contractSchema = z.object({
   investorId: z.string().min(1, "Selecciona un inversionista"),
   amount: z.coerce.number().min(1, "Monto inválido"),
   durationMonths: z.coerce.number().int().min(1).max(120),
-  returnRate: z.coerce.number().min(0).max(100),
+  startDate: z.coerce.date(),
+  returnRate: z.coerce.number().min(0).max(1000),
   modality: z.enum(["FIXED", "VARIABLE", "PARTICIPATION"]),
   paymentFrequency: z.enum(["MONTHLY", "QUARTERLY", "AT_MATURITY", "CUSTOM"]),
   customIntervalMonths: z
@@ -36,6 +38,7 @@ export async function createContract(
     investorId: formData.get("investorId"),
     amount: formData.get("amount"),
     durationMonths: formData.get("durationMonths"),
+    startDate: formData.get("startDate"),
     returnRate: formData.get("returnRate"),
     modality: formData.get("modality"),
     paymentFrequency: formData.get("paymentFrequency") || "MONTHLY",
@@ -64,7 +67,8 @@ export async function createContract(
       ? (data.customIntervalMonths ?? 1)
       : null;
 
-  const startDate = new Date();
+  // Fecha de inicio elegida por el usuario; la de término se deriva del plazo.
+  const startDate = data.startDate;
   const endDate = new Date(startDate);
   endDate.setMonth(endDate.getMonth() + data.durationMonths);
 
@@ -147,6 +151,10 @@ export async function signContract(id: string, signatureName: string) {
     if (payments.length > 0) {
       await tx.payment.createMany({ data: payments });
     }
+
+    // El contrato pasó a SIGNED: recalcula el capital/rentabilidad del
+    // inversionista (rollup derivado de sus contratos comprometidos).
+    await recalcInvestorFinancials(tx, contract.investorId);
 
     await tx.auditLog.create({
       data: {

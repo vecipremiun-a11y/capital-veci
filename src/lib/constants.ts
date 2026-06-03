@@ -119,6 +119,13 @@ export const OPERATION_STATUS_LABELS: Record<string, string> = {
  */
 export const OPERATION_COMMITTED_STATUSES = ["ACTIVE", "PAUSED", "RISK"] as const;
 
+/**
+ * Estados de contrato que cuentan como capital realmente aportado al fondo.
+ * Un contrato firmado/activo es plata comprometida; un borrador (DRAFT),
+ * vencido (EXPIRED) o cancelado (CANCELLED) no suma al capital del inversionista.
+ */
+export const CONTRACT_COMMITTED_STATUSES = ["ACTIVE", "SIGNED"] as const;
+
 export const OPERATION_CATEGORY_LABELS: Record<string, string> = {
   MINIMARKET: "Minimarket",
   LOANS: "Préstamos",

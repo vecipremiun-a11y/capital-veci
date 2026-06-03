@@ -2,7 +2,7 @@
 
 import { useTransition } from "react";
 import Link from "next/link";
-import { MoreHorizontal, Eye, Ban, CheckCircle2, Loader2 } from "lucide-react";
+import { MoreHorizontal, Eye, Pencil, Ban, CheckCircle2, Loader2 } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -38,6 +38,11 @@ export function InvestorRowActions({
         <DropdownMenuItem asChild>
           <Link href={`/inversionistas/${id}`}>
             <Eye /> Ver perfil
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild>
+          <Link href={`/inversionistas/${id}/editar`}>
+            <Pencil /> Editar
           </Link>
         </DropdownMenuItem>
         <DropdownMenuSeparator />

@@ -5,16 +5,16 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { hashPassword, requirePermission } from "@/lib/auth";
+import { normalizeRut, validateRut } from "@/lib/format";
 
 const investorSchema = z.object({
   fullName: z.string().min(3, "Nombre demasiado corto"),
-  rut: z.string().min(7, "RUT inválido"),
+  rut: z
+    .string()
+    .min(7, "RUT inválido")
+    .refine(validateRut, "RUT inválido: revisa el dígito verificador"),
   email: z.string().email("Correo inválido").optional().or(z.literal("")),
   phone: z.string().optional(),
-  investedCapital: z.coerce.number().min(0),
-  expectedReturn: z.coerce.number().min(0).max(100),
-  riskLevel: z.enum(["LOW", "MEDIUM", "HIGH"]),
-  status: z.enum(["ACTIVE", "FINISHED", "RISK", "BLOCKED"]),
   notes: z.string().optional(),
 });
 
@@ -34,10 +34,6 @@ export async function createInvestor(
     rut: formData.get("rut"),
     email: formData.get("email"),
     phone: formData.get("phone"),
-    investedCapital: formData.get("investedCapital"),
-    expectedReturn: formData.get("expectedReturn"),
-    riskLevel: formData.get("riskLevel"),
-    status: formData.get("status"),
     notes: formData.get("notes"),
   });
 
@@ -50,7 +46,8 @@ export async function createInvestor(
   }
 
   const data = parsed.data;
-  const existing = await db.investor.findUnique({ where: { rut: data.rut } });
+  const rut = normalizeRut(data.rut);
+  const existing = await db.investor.findUnique({ where: { rut } });
   if (existing) {
     return {
       error: "Ya existe un inversionista con ese RUT.",
@@ -58,16 +55,15 @@ export async function createInvestor(
     };
   }
 
+  // Capital y rentabilidad arrancan en 0 y se derivan de los contratos
+  // (ver recalcInvestorFinancials al firmar un contrato). Riesgo/estado
+  // toman los defaults del esquema y se ajustan luego al editar.
   const investor = await db.investor.create({
     data: {
       fullName: data.fullName,
-      rut: data.rut,
+      rut,
       email: data.email || null,
       phone: data.phone || null,
-      investedCapital: data.investedCapital,
-      expectedReturn: data.expectedReturn,
-      riskLevel: data.riskLevel,
-      status: data.status,
       notes: data.notes || null,
     },
   });
@@ -83,6 +79,93 @@ export async function createInvestor(
 
   revalidatePath("/inversionistas");
   redirect(`/inversionistas/${investor.id}`);
+}
+
+// ---------------------------------------------------------
+//  Editar inversionista (identidad + clasificación)
+//  Capital y rentabilidad NO se editan aquí: son derivados de
+//  los contratos (ver recalcInvestorFinancials).
+// ---------------------------------------------------------
+const updateInvestorSchema = z.object({
+  fullName: z.string().min(3, "Nombre demasiado corto"),
+  rut: z
+    .string()
+    .min(7, "RUT inválido")
+    .refine(validateRut, "RUT inválido: revisa el dígito verificador"),
+  email: z.string().email("Correo inválido").optional().or(z.literal("")),
+  phone: z.string().optional(),
+  notes: z.string().optional(),
+  riskLevel: z.enum(["LOW", "MEDIUM", "HIGH"]),
+  status: z.enum(["ACTIVE", "FINISHED", "RISK", "BLOCKED"]),
+});
+
+export async function updateInvestor(
+  id: string,
+  _prev: InvestorFormState,
+  formData: FormData,
+): Promise<InvestorFormState> {
+  await requirePermission("investors");
+
+  const parsed = updateInvestorSchema.safeParse({
+    fullName: formData.get("fullName"),
+    rut: formData.get("rut"),
+    email: formData.get("email"),
+    phone: formData.get("phone"),
+    notes: formData.get("notes"),
+    riskLevel: formData.get("riskLevel"),
+    status: formData.get("status"),
+  });
+
+  if (!parsed.success) {
+    const fieldErrors: Record<string, string> = {};
+    for (const issue of parsed.error.issues) {
+      fieldErrors[String(issue.path[0])] = issue.message;
+    }
+    return { error: "Revisa los campos marcados.", fieldErrors };
+  }
+
+  const data = parsed.data;
+  const rut = normalizeRut(data.rut);
+
+  const existing = await db.investor.findUnique({ where: { id } });
+  if (!existing) {
+    return { error: "Inversionista no encontrado." };
+  }
+
+  // El RUT debe seguir siendo único (permitiendo conservar el propio).
+  const duplicate = await db.investor.findUnique({ where: { rut } });
+  if (duplicate && duplicate.id !== id) {
+    return {
+      error: "Ya existe otro inversionista con ese RUT.",
+      fieldErrors: { rut: "RUT ya registrado" },
+    };
+  }
+
+  await db.investor.update({
+    where: { id },
+    data: {
+      fullName: data.fullName,
+      rut,
+      email: data.email || null,
+      phone: data.phone || null,
+      notes: data.notes || null,
+      riskLevel: data.riskLevel,
+      status: data.status,
+    },
+  });
+
+  await db.auditLog.create({
+    data: {
+      action: "UPDATE",
+      entity: "Investor",
+      entityId: id,
+      detail: `Edición de inversionista ${data.fullName}`,
+    },
+  });
+
+  revalidatePath("/inversionistas");
+  revalidatePath(`/inversionistas/${id}`);
+  redirect(`/inversionistas/${id}`);
 }
 
 // ---------------------------------------------------------

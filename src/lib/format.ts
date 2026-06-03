@@ -80,10 +80,45 @@ export function relativeDays(date: Date | string): string {
   return `Hace ${Math.abs(days)} días`;
 }
 
+/** Deja solo dígitos y K, en mayúscula: " 12.345.678-k " -> "12345678K" */
+export function cleanRut(rut: string | null | undefined): string {
+  if (!rut) return "";
+  return rut.replace(/[^0-9kK]/g, "").toUpperCase();
+}
+
+/** Forma canónica para guardar / comparar: 12345678-9 (sin puntos). */
+export function normalizeRut(rut: string | null | undefined): string {
+  const clean = cleanRut(rut);
+  if (clean.length < 2) return clean;
+  return `${clean.slice(0, -1)}-${clean.slice(-1)}`;
+}
+
+/**
+ * Valida un RUT chileno con su dígito verificador (módulo 11).
+ * Rechaza RUTs con dígito verificador incorrecto.
+ */
+export function validateRut(rut: string | null | undefined): boolean {
+  const clean = cleanRut(rut);
+  if (clean.length < 2) return false;
+  const body = clean.slice(0, -1);
+  const dv = clean.slice(-1);
+  if (!/^\d+$/.test(body)) return false;
+
+  let sum = 0;
+  let mul = 2;
+  for (let i = body.length - 1; i >= 0; i--) {
+    sum += parseInt(body[i], 10) * mul;
+    mul = mul === 7 ? 2 : mul + 1;
+  }
+  const mod = 11 - (sum % 11);
+  const expected = mod === 11 ? "0" : mod === 10 ? "K" : String(mod);
+  return expected === dv;
+}
+
 /** Formatea un RUT chileno: 12345678-9 -> 12.345.678-9 */
 export function formatRut(rut: string | null | undefined): string {
   if (!rut) return "—";
-  const clean = rut.replace(/[^0-9kK]/g, "").toUpperCase();
+  const clean = cleanRut(rut);
   if (clean.length < 2) return rut;
   const body = clean.slice(0, -1);
   const dv = clean.slice(-1);

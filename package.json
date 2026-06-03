@@ -12,6 +12,7 @@
     "db:push": "prisma db push",
     "db:generate": "prisma generate",
     "db:seed": "tsx prisma/seed.ts",
+    "db:backfill-investors": "tsx prisma/backfill-investor-financials.ts",
     "db:studio": "prisma studio",
     "setup": "prisma db push && tsx prisma/seed.ts"
   },

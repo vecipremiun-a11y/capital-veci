@@ -11,12 +11,19 @@ import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { formatCurrency, formatPercent } from "@/lib/format";
+import { formatCurrency, formatPercent, formatDate } from "@/lib/format";
 import { PAYMENT_FREQUENCY_OPTIONS } from "@/lib/constants";
 import { buildSchedule, type PaymentFrequency } from "@/lib/payments";
 
 const selectClass =
   "flex h-10 w-full rounded-md border border-input bg-background/50 px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring";
+
+/** Fecha de hoy en formato yyyy-mm-dd (hora local, sin desfase UTC). */
+function todayISO(): string {
+  const d = new Date();
+  const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 10);
+}
 
 function SubmitButton() {
   const { pending } = useFormStatus();
@@ -42,7 +49,7 @@ export function ContractForm({
   preselected,
   template,
 }: {
-  investors: { id: string; fullName: string; expectedReturn: number; investedCapital: number }[];
+  investors: { id: string; fullName: string }[];
   preselected?: string;
   template?: ContractTemplateDefaults;
 }) {
@@ -54,7 +61,20 @@ export function ContractForm({
 
   const [amount, setAmount] = useState(0);
   const [rate, setRate] = useState(template?.returnRate ?? 12);
+  // La tasa se guarda SIEMPRE como anual; "MONTHLY" solo cambia cómo la ingresa
+  // el usuario (×12 para obtener la anual equivalente).
+  const [rateMode, setRateMode] = useState<"ANNUAL" | "MONTHLY">("ANNUAL");
+  const annualRate = rateMode === "MONTHLY" ? rate * 12 : rate;
   const [duration, setDuration] = useState(template?.durationMonths ?? 12);
+  const [startDate, setStartDate] = useState(todayISO);
+  // Fechas en hora local; la de término se calcula sola: inicio + duración.
+  const { startObj, endDate } = useMemo(() => {
+    const start = new Date(`${startDate}T00:00:00`);
+    if (Number.isNaN(start.getTime())) return { startObj: null, endDate: null };
+    const end = new Date(start);
+    end.setMonth(end.getMonth() + Math.max(Math.round(duration), 1));
+    return { startObj: start, endDate: end };
+  }, [startDate, duration]);
   const [frequency, setFrequency] = useState<PaymentFrequency>(
     (template?.paymentFrequency as PaymentFrequency) || "MONTHLY",
   );
@@ -70,7 +90,7 @@ export function ContractForm({
     () =>
       buildSchedule({
         amount,
-        annualRate: rate,
+        annualRate,
         durationMonths: duration,
         frequency,
         customIntervalMonths: frequency === "CUSTOM" ? customInterval : undefined,
@@ -81,7 +101,7 @@ export function ContractForm({
               ? 0
               : 100,
       }),
-    [amount, rate, duration, frequency, customInterval, periodicPct],
+    [amount, annualRate, duration, frequency, customInterval, periodicPct],
   );
 
   // Para la mini-tabla: muestra hasta 4 cuotas + el pago final.
@@ -106,13 +126,6 @@ export function ContractForm({
                 name="investorId"
                 className={selectClass}
                 defaultValue={preselected ?? ""}
-                onChange={(e) => {
-                  const inv = investors.find((i) => i.id === e.target.value);
-                  if (inv) {
-                    setRate(inv.expectedReturn);
-                    setAmount(inv.investedCapital);
-                  }
-                }}
                 required
               >
                 <option value="" disabled>
@@ -145,18 +158,39 @@ export function ContractForm({
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="returnRate">Retorno estimado anual (%)</Label>
-              <Input
-                id="returnRate"
-                name="returnRate"
-                type="number"
-                min="0"
-                max="100"
-                step="0.5"
-                value={rate}
-                onChange={(e) => setRate(Number(e.target.value))}
-                required
-              />
+              <Label htmlFor="returnRateInput">
+                Retorno estimado {rateMode === "MONTHLY" ? "mensual" : "anual"} (%)
+              </Label>
+              {/* La tasa anual es lo que se guarda y valida en el servidor. */}
+              <input type="hidden" name="returnRate" value={annualRate} />
+              <div className="flex gap-2">
+                <Input
+                  id="returnRateInput"
+                  type="number"
+                  min="0"
+                  max={rateMode === "MONTHLY" ? "100" : "1000"}
+                  step="0.5"
+                  value={rate}
+                  onChange={(e) => setRate(Number(e.target.value))}
+                  required
+                />
+                <select
+                  aria-label="Periodicidad de la tasa"
+                  className={`${selectClass} w-auto shrink-0`}
+                  value={rateMode}
+                  onChange={(e) =>
+                    setRateMode(e.target.value as "ANNUAL" | "MONTHLY")
+                  }
+                >
+                  <option value="ANNUAL">Anual</option>
+                  <option value="MONTHLY">Mensual</option>
+                </select>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {rateMode === "MONTHLY"
+                  ? `Equivale a ${annualRate.toLocaleString("es-CL")}% anual`
+                  : `Equivale a ${(annualRate / 12).toLocaleString("es-CL", { maximumFractionDigits: 2 })}% mensual`}
+              </p>
             </div>
 
             <div className="space-y-2">
@@ -171,6 +205,23 @@ export function ContractForm({
                 onChange={(e) => setDuration(Number(e.target.value))}
                 required
               />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="startDate">Fecha de inicio</Label>
+              <Input
+                id="startDate"
+                name="startDate"
+                type="date"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+                required
+              />
+              <p className="text-xs text-muted-foreground">
+                {endDate
+                  ? `Termina el ${formatDate(endDate)}`
+                  : "Fecha inválida"}
+              </p>
             </div>
 
             <div className="space-y-2">
@@ -291,8 +342,20 @@ export function ContractForm({
           </CardHeader>
           <CardContent className="space-y-4">
             <Row label="Capital" value={formatCurrency(amount)} />
-            <Row label="Retorno estimado anual" value={formatPercent(rate)} />
+            <Row label="Retorno estimado anual" value={formatPercent(annualRate)} />
+            <Row
+              label="Equivale mensual"
+              value={formatPercent(annualRate / 12, 2)}
+            />
             <Row label="Plazo" value={`${duration} meses`} />
+            <Row
+              label="Vigencia"
+              value={
+                startObj && endDate
+                  ? `${formatDate(startObj)} → ${formatDate(endDate)}`
+                  : "—"
+              }
+            />
             <div className="gold-rule" />
             {schedule.periodCount > 0 && (
               <>
