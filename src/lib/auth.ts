@@ -35,12 +35,51 @@ export async function verifyPassword(
   return bcrypt.compare(password, hash);
 }
 
-export async function createSession(user: SessionUser): Promise<void> {
-  const token = await new SignJWT(user)
+/**
+ * Firma un JWT de sesión y lo devuelve como string.
+ * Lo usa tanto la cookie de la web (createSession) como el login de la API
+ * (apps externas que envían el token en el header Authorization).
+ */
+export async function signSessionToken(
+  user: SessionUser,
+  maxAgeSeconds: number = MAX_AGE,
+): Promise<string> {
+  return new SignJWT(user)
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
-    .setExpirationTime(`${MAX_AGE}s`)
+    .setExpirationTime(`${maxAgeSeconds}s`)
     .sign(getSecret());
+}
+
+/** Verifica un token JWT (sin cookies) y devuelve la sesión o null. */
+export async function verifyToken(
+  token: string | undefined,
+): Promise<SessionUser | null> {
+  if (!token) return null;
+  try {
+    const { payload } = await jwtVerify(token, getSecret());
+    return payload as SessionUser;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Extrae y verifica la sesión desde el header `Authorization: Bearer <jwt>`.
+ * Para las rutas de API consumidas por la app (no usan cookie).
+ */
+export async function getBearerSession(
+  req: Request,
+): Promise<SessionUser | null> {
+  const header = req.headers.get("authorization") || "";
+  const token = header.toLowerCase().startsWith("bearer ")
+    ? header.slice(7).trim()
+    : undefined;
+  return verifyToken(token);
+}
+
+export async function createSession(user: SessionUser): Promise<void> {
+  const token = await signSessionToken(user);
 
   const cookieStore = await cookies();
   cookieStore.set(COOKIE_NAME, token, {

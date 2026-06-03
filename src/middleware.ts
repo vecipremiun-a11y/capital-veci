@@ -3,7 +3,9 @@ import { jwtVerify } from "jose";
 
 const COOKIE_NAME = "veci_session";
 
-const PUBLIC_PATHS = ["/login", "/api/auth"];
+// /api/v1 = API para apps externas; se autentica por su cuenta (Bearer token),
+// así que el middleware de cookie no debe redirigirla a /login.
+const PUBLIC_PATHS = ["/login", "/api/auth", "/api/v1"];
 
 function isPublic(pathname: string): boolean {
   return PUBLIC_PATHS.some((p) => pathname.startsWith(p));
