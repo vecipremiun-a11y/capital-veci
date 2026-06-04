@@ -71,7 +71,7 @@ export function buildLoanSchedule(input: {
 
   const total = Math.round(capital * (1 + returnPct / 100));
   const base = Math.floor(total / term);
-  const stepDays = input.frequency === "WEEKLY" ? 7 : input.frequency === "BIWEEKLY" ? 14 : 0;
+  const stepDays = input.frequency === "WEEKLY" ? 7 : input.frequency === "BIWEEKLY" ? 15 : 0;
 
   const installments: ScheduleItem[] = [];
   for (let k = 1; k <= term; k++) {
@@ -108,15 +108,32 @@ const FREQUENCY_LABEL: Record<LoanFrequency, string> = {
   MONTHLY: "Mensual",
 };
 
+// Como aún no hay columna de frecuencia (migración pendiente), se guarda
+// como una etiqueta dentro de `description` y se lee de vuelta al responder.
+const FREQ_TAG = /\[freq:(DAILY|WEEKLY|BIWEEKLY|MONTHLY)\]/i;
+
+function readFrequencyTag(description: string | null): LoanFrequency | null {
+  const m = description?.match(FREQ_TAG);
+  return m ? (m[1].toUpperCase() as LoanFrequency) : null;
+}
+
+function composeDescription(
+  desc: string | null | undefined,
+  freq: LoanFrequency,
+): string {
+  const base = (desc ?? "").replace(FREQ_TAG, "").trim();
+  return base ? `${base} [freq:${freq}]` : `[freq:${freq}]`;
+}
+
 function summarizeInstallments(
   installments: { amount: number; paidAmount: number; dueDate: Date; status: string }[],
+  taggedFrequency?: LoanFrequency | null,
 ) {
   const total = installments.reduce((s, c) => s + c.amount, 0);
   const paid = installments.reduce((s, c) => s + c.paidAmount, 0);
   const paidCount = installments.filter((c) => c.status === "PAID").length;
-  const frequency = inferFrequency(
-    installments.map((c) => new Date(c.dueDate)),
-  );
+  const frequency =
+    taggedFrequency ?? inferFrequency(installments.map((c) => new Date(c.dueDate)));
   return {
     total,
     paid,
@@ -138,7 +155,7 @@ export async function listLoans() {
   });
 
   return ops.map((op) => {
-    const sum = summarizeInstallments(op.installments);
+    const sum = summarizeInstallments(op.installments, readFrequencyTag(op.description));
     return {
       id: op.id,
       code: op.code,
@@ -165,7 +182,7 @@ export async function getLoan(id: string) {
     },
   });
   if (!op || op.category !== "LOANS") return null;
-  const sum = summarizeInstallments(op.installments);
+  const sum = summarizeInstallments(op.installments, readFrequencyTag(op.description));
   return {
     id: op.id,
     code: op.code,
@@ -208,12 +225,31 @@ export async function loanSummary() {
   const now = new Date();
   const monthKey = `${now.getFullYear()}-${now.getMonth()}`;
 
+  // Métricas sobre TODAS las cuotas/cobros (según el contrato de la app).
   let outstanding = 0;
-  let lentCapital = 0;
-  let totalToCollect = 0;
   let totalCollected = 0;
   let collectedThisMonth = 0;
   let overdueCount = 0;
+  for (const op of ops) {
+    for (const c of op.installments) {
+      outstanding += Math.max(c.amount - c.paidAmount, 0);
+      totalCollected += c.paidAmount;
+      if (
+        new Date(c.dueDate) < now &&
+        (c.status === "PENDING" || c.status === "PARTIAL")
+      )
+        overdueCount++;
+    }
+    for (const p of op.loanPayments) {
+      const d = new Date(p.createdAt);
+      if (`${d.getFullYear()}-${d.getMonth()}` === monthKey)
+        collectedThisMonth += p.amount;
+    }
+  }
+
+  // Métricas sobre préstamos activos (capital comprometido y por venir).
+  let lentCapital = 0;
+  let totalToCollect = 0;
   const upcoming: {
     operationId: string;
     borrowerName: string | null;
@@ -221,17 +257,11 @@ export async function loanSummary() {
     dueDate: Date;
     remaining: number;
   }[] = [];
-
   for (const op of active) {
     lentCapital += op.capitalUsed;
     for (const c of op.installments) {
       totalToCollect += c.amount;
       const remaining = Math.max(c.amount - c.paidAmount, 0);
-      outstanding += remaining;
-      const overdue =
-        new Date(c.dueDate) < now &&
-        (c.status === "PENDING" || c.status === "PARTIAL");
-      if (overdue) overdueCount++;
       if (remaining > 0) {
         upcoming.push({
           operationId: op.id,
@@ -241,12 +271,6 @@ export async function loanSummary() {
           remaining,
         });
       }
-    }
-    for (const p of op.loanPayments) {
-      totalCollected += p.amount;
-      const d = new Date(p.createdAt);
-      if (`${d.getFullYear()}-${d.getMonth()}` === monthKey)
-        collectedThisMonth += p.amount;
     }
   }
 
@@ -302,7 +326,8 @@ export async function createLoan(
         code,
         name: input.name,
         category: "LOANS",
-        description: input.description || null,
+        // La frecuencia se guarda como etiqueta en description (sin columna propia aún).
+        description: composeDescription(input.description, input.frequency),
         capitalUsed: input.capital,
         expectedReturn: input.returnPct,
         startDate: input.startDate,
