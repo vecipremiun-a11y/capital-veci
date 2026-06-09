@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { requirePermission } from "@/lib/auth";
-import { buildDailyLoanSchedule } from "@/lib/loans";
+import { buildLoanSchedule } from "@/lib/loans";
 import { DEFAULT_COLLECT_WEEKDAYS } from "@/lib/constants";
 
 // =========================================================
@@ -57,15 +57,24 @@ const createSchema = z.object({
   responsibleId: z.string().optional().nullable(),
   capitalUsed: z.coerce.number().positive("El capital debe ser mayor a 0"),
   expectedReturn: z.coerce.number().min(0).max(500),
-  durationMonths: z.coerce.number().int().min(1).max(120),
+  // Para préstamos no se pide: el plazo sale del calendario de cuotas.
+  durationMonths: z.coerce.number().int().min(1).max(120).optional().default(1),
   startDate: z.string().min(8, "Fecha inicio requerida"),
   riskLevel: z.enum(RISKS),
   status: z.enum(["ACTIVE", "PAUSED", "RISK"]).default("ACTIVE"),
   // JSON con la lista de participantes inversionistas
   participants: z.string().optional().nullable(),
-  // --- Cobro diario ---
+  // --- Cobro diario / en cuotas ---
   isDailyLoan: z.coerce.boolean().optional().default(false),
+  // Frecuencia del calendario de cuotas.
+  frequency: z
+    .enum(["DAILY", "WEEKLY", "BIWEEKLY", "MONTHLY"])
+    .optional()
+    .default("DAILY"),
+  // "TERM" → se fija el N° de cuotas; "DAILY_AMOUNT" → se fija el monto por cuota.
+  dailyMode: z.enum(["TERM", "DAILY_AMOUNT"]).optional().default("TERM"),
   dailyTermDays: z.coerce.number().int().min(1).max(365).optional(),
+  dailyAmount: z.coerce.number().min(0).optional(),
   // CSV de días que se cobra, ej "1,2,3,4,5,6"
   collectWeekdays: z.string().optional().nullable(),
   borrowerName: z.string().max(120).optional().nullable(),
@@ -155,13 +164,16 @@ export async function createOperation(
     responsibleId: formData.get("responsibleId") || null,
     capitalUsed: formData.get("capitalUsed"),
     expectedReturn: formData.get("expectedReturn"),
-    durationMonths: formData.get("durationMonths"),
+    durationMonths: formData.get("durationMonths") || undefined,
     startDate: formData.get("startDate"),
     riskLevel: formData.get("riskLevel"),
     status: formData.get("status") || "ACTIVE",
     participants: formData.get("participants"),
     isDailyLoan: formData.get("isDailyLoan") === "true",
+    frequency: formData.get("frequency") || "DAILY",
+    dailyMode: formData.get("dailyMode") || "TERM",
     dailyTermDays: formData.get("dailyTermDays") || undefined,
+    dailyAmount: formData.get("dailyAmount") || undefined,
     collectWeekdays: formData.get("collectWeekdays"),
     borrowerName: formData.get("borrowerName"),
     borrowerPhone: formData.get("borrowerPhone"),
@@ -177,6 +189,11 @@ export async function createOperation(
   const data = parsed.data;
   const participants = parseParticipants(data.participants);
 
+  // En un préstamo el cliente/deudor es obligatorio (da nombre a la operación).
+  if (data.category === "LOANS" && !data.borrowerName?.trim()) {
+    return { error: "Indica el cliente/deudor del préstamo." };
+  }
+
   // Validar que la suma de aportes no exceda el capital de la operación
   const totalParticipants = participants.reduce((s, p) => s + p.amount, 0);
   if (totalParticipants > data.capitalUsed) {
@@ -190,31 +207,58 @@ export async function createOperation(
   const code = `OP-${String(1000 + count + 1)}`;
 
   const startDate = new Date(data.startDate);
-  const endDate = addMonths(startDate, data.durationMonths);
 
   // --- Cobro diario: prepara el calendario de cuotas (si aplica) ---
   // El total a cobrar es plano: capital × (1 + retorno%/100), igual que el
   // preview del formulario. El dinero recaudado se registra como cobranza;
   // la liquidez se libera recién al finalizar la operación.
   const isDailyLoan = data.isDailyLoan === true;
+  const frequency = data.frequency ?? "DAILY";
   const collectWeekdays = parseWeekdays(data.collectWeekdays);
+  const dailyMode = data.dailyMode ?? "TERM";
   const termDays = data.dailyTermDays ?? 0;
-  const schedule =
-    isDailyLoan && termDays > 0
-      ? buildDailyLoanSchedule({
-          capital: data.capitalUsed,
-          returnPct: data.expectedReturn,
-          startDate,
-          termDays,
-          collectWeekdays,
-        })
-      : null;
+  const dailyAmount = data.dailyAmount ?? 0;
+
+  // Validación previa del modo elegido (mensaje claro para cada caso).
+  if (isDailyLoan) {
+    if (dailyMode === "DAILY_AMOUNT" && dailyAmount <= 0) {
+      return { error: "Indica un monto por cuota mayor a 0." };
+    }
+    if (dailyMode === "TERM" && termDays <= 0) {
+      return { error: "Indica un número de cuotas válido." };
+    }
+  }
+
+  const schedule = isDailyLoan
+    ? buildLoanSchedule({
+        capital: data.capitalUsed,
+        returnPct: data.expectedReturn,
+        startDate,
+        frequency,
+        termDays,
+        collectWeekdays,
+        mode: dailyMode,
+        dailyAmount,
+      })
+    : null;
 
   if (isDailyLoan && (!schedule || schedule.installments.length === 0)) {
     return {
-      error: "Para un préstamo con cobro diario indica un número de días válido.",
+      error: "No se pudo generar el calendario de cuotas. Revisa los datos.",
     };
   }
+  if (schedule && schedule.installments.length > 365) {
+    return {
+      error: "El monto por cuota es muy bajo: genera demasiadas cuotas. Súbelo.",
+    };
+  }
+
+  // En un préstamo el plazo real lo define el calendario (última cuota); para el
+  // resto de operaciones se usa la duración en meses.
+  const endDate = schedule?.endDate ?? addMonths(startDate, data.durationMonths);
+  // Sin responsable elegido, en un préstamo queda a cargo de quien lo crea.
+  const responsibleId =
+    data.responsibleId || (data.category === "LOANS" ? session.sub : null);
 
   // Una sola transacción: operación + participantes + movimiento + cuotas + log
   const operation = await db.$transaction(async (tx) => {
@@ -225,7 +269,7 @@ export async function createOperation(
         category: data.category,
         description: data.description || null,
         business: data.business || null,
-        responsibleId: data.responsibleId || null,
+        responsibleId,
         capitalUsed: data.capitalUsed,
         expectedReturn: data.expectedReturn,
         startDate,
@@ -233,8 +277,11 @@ export async function createOperation(
         riskLevel: data.riskLevel,
         status: data.status,
         isDailyLoan,
-        dailyTermDays: isDailyLoan ? termDays : null,
-        collectWeekdays: isDailyLoan ? collectWeekdays.join(",") : null,
+        // Se guarda la cantidad real de cuotas generadas (coherente en ambos modos).
+        dailyTermDays: isDailyLoan ? schedule!.installments.length : null,
+        // Los días de la semana solo aplican al cobro diario.
+        collectWeekdays:
+          isDailyLoan && frequency === "DAILY" ? collectWeekdays.join(",") : null,
         borrowerName: isDailyLoan ? data.borrowerName || null : null,
         borrowerPhone: isDailyLoan ? data.borrowerPhone || null : null,
       },

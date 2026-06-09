@@ -9,7 +9,14 @@ import { OperationForm } from "./operation-form";
 export const metadata: Metadata = { title: "Nueva operación" };
 export const dynamic = "force-dynamic";
 
-export default async function NewOperationPage() {
+export default async function NewOperationPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ tipo?: string }>;
+}) {
+  const { tipo } = await searchParams;
+  const isLoan = tipo === "prestamo";
+
   const [investors, staff] = await Promise.all([
     db.investor.findMany({
       where: { status: { in: ["ACTIVE", "RISK"] } },
@@ -31,10 +38,18 @@ export default async function NewOperationPage() {
         </Link>
       </Button>
       <PageHeader
-        title="Nueva operación"
-        description="Define dónde se va a invertir el capital. Al crearla, baja la liquidez disponible y sube el capital comprometido automáticamente."
+        title={isLoan ? "Nuevo préstamo" : "Nueva operación"}
+        description={
+          isLoan
+            ? "Registra un préstamo con cobro diario. Solo lo esencial: cliente, monto, interés y plan de cobro."
+            : "Define dónde se va a invertir el capital. Al crearla, baja la liquidez disponible y sube el capital comprometido automáticamente."
+        }
       />
-      <OperationForm investors={investors} staff={staff} />
+      <OperationForm
+        investors={investors}
+        staff={staff}
+        initialCategory={isLoan ? "LOANS" : "COMMERCIAL"}
+      />
     </div>
   );
 }

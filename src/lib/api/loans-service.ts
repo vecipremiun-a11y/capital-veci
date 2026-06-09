@@ -1,6 +1,6 @@
 import "server-only";
 import { db } from "@/lib/db";
-import { buildDailyLoanSchedule } from "@/lib/loans";
+import { buildLoanSchedule as buildSchedule, type LoanFrequency } from "@/lib/loans";
 import {
   DEFAULT_COLLECT_WEEKDAYS,
   OPERATION_COMMITTED_STATUSES,
@@ -18,76 +18,15 @@ import {
  * Un "préstamo" = Operation con category "LOANS" + sus LoanInstallment.
  */
 
-export type LoanFrequency = "DAILY" | "WEEKLY" | "BIWEEKLY" | "MONTHLY";
+// La frecuencia y el generador de calendario viven en @/lib/loans (client-safe)
+// para que web, servidor y API usen exactamente la misma lógica.
+export type { LoanFrequency };
 const COMMITTED: string[] = [...OPERATION_COMMITTED_STATUSES];
 
-function addDays(d: Date, days: number): Date {
-  const r = new Date(d);
-  r.setDate(r.getDate() + days);
-  return r;
-}
 function addMonths(d: Date, months: number): Date {
   const r = new Date(d);
   r.setMonth(r.getMonth() + months);
   return r;
-}
-
-interface ScheduleItem {
-  sequence: number;
-  dueDate: Date;
-  amount: number;
-}
-
-/**
- * Genera el calendario de cuotas según la frecuencia.
- *   total a cobrar = round(capital × (1 + retorno%/100))   (interés plano)
- *   cuota          = floor(total / term); la última absorbe el redondeo.
- * DAILY usa la lógica por días hábiles (buildDailyLoanSchedule). Las demás
- * frecuencias colocan una cuota cada 7 / 14 días o cada mes, empezando un
- * período después de la fecha de inicio.
- */
-export function buildLoanSchedule(input: {
-  capital: number;
-  returnPct: number;
-  startDate: Date;
-  term: number;
-  frequency: LoanFrequency;
-  collectWeekdays?: number[];
-}): { total: number; installments: ScheduleItem[]; endDate: Date | null } {
-  const capital = Math.max(input.capital, 0);
-  const returnPct = Math.max(input.returnPct, 0);
-  const term = Math.max(Math.round(input.term), 1);
-
-  if (input.frequency === "DAILY") {
-    const s = buildDailyLoanSchedule({
-      capital,
-      returnPct,
-      startDate: input.startDate,
-      termDays: term,
-      collectWeekdays: input.collectWeekdays ?? [...DEFAULT_COLLECT_WEEKDAYS],
-    });
-    return { total: s.total, installments: s.installments, endDate: s.endDate };
-  }
-
-  const total = Math.round(capital * (1 + returnPct / 100));
-  const base = Math.floor(total / term);
-  const stepDays = input.frequency === "WEEKLY" ? 7 : input.frequency === "BIWEEKLY" ? 15 : 0;
-
-  const installments: ScheduleItem[] = [];
-  for (let k = 1; k <= term; k++) {
-    const dueDate =
-      input.frequency === "MONTHLY"
-        ? addMonths(input.startDate, k)
-        : addDays(input.startDate, stepDays * k);
-    const amount = k === term ? total - base * (term - 1) : base;
-    installments.push({ sequence: k, dueDate, amount });
-  }
-
-  return {
-    total,
-    installments,
-    endDate: installments[installments.length - 1]?.dueDate ?? null,
-  };
 }
 
 /** Infiere la frecuencia mirando la separación entre las dos primeras cuotas. */
@@ -301,9 +240,11 @@ export async function createLoan(
     capital: number;
     returnPct: number;
     startDate: Date;
-    term: number;
+    term?: number;
     frequency: LoanFrequency;
     collectWeekdays?: number[];
+    /** Monto fijo por cuota; si viene > 0, el N° de cuotas se deriva. */
+    installmentAmount?: number;
     borrowerName?: string | null;
     borrowerPhone?: string | null;
     riskLevel?: "LOW" | "MEDIUM" | "HIGH";
@@ -311,9 +252,22 @@ export async function createLoan(
   },
   userId?: string,
 ) {
-  const schedule = buildLoanSchedule(input);
+  const byAmount = (input.installmentAmount ?? 0) > 0;
+  const schedule = buildSchedule({
+    capital: input.capital,
+    returnPct: input.returnPct,
+    startDate: input.startDate,
+    frequency: input.frequency,
+    termDays: input.term ?? 0,
+    collectWeekdays: input.collectWeekdays ?? [...DEFAULT_COLLECT_WEEKDAYS],
+    mode: byAmount ? "DAILY_AMOUNT" : "TERM",
+    dailyAmount: input.installmentAmount ?? 0,
+  });
   if (schedule.installments.length === 0) {
     throw new Error("No se pudo generar el calendario de cuotas.");
+  }
+  if (schedule.installments.length > 365) {
+    throw new Error("El monto por cuota es muy bajo: genera demasiadas cuotas.");
   }
 
   const count = await db.operation.count();
@@ -336,7 +290,7 @@ export async function createLoan(
         status: "ACTIVE",
         // Se modela como préstamo en cuotas para que aparezca en cobros del panel.
         isDailyLoan: true,
-        dailyTermDays: input.term,
+        dailyTermDays: schedule.installments.length,
         collectWeekdays:
           input.frequency === "DAILY"
             ? (input.collectWeekdays ?? [...DEFAULT_COLLECT_WEEKDAYS]).join(",")

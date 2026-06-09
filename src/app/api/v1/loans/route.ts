@@ -26,8 +26,11 @@ export function GET(req: Request) {
 
 /**
  * POST /api/v1/loans  →  crea un préstamo (Operation LOANS + cuotas + asiento).
- * Body: { name, capital, returnPct, startDate, term, frequency,
+ * Body: { name, capital, returnPct, startDate, frequency,
+ *         term? | installmentAmount?,   ← uno de los dos define el calendario
  *         collectWeekdays?, borrowerName?, borrowerPhone?, riskLevel?, description? }
+ * Con `installmentAmount` se fija la cuota redonda y se derivan las cuotas (el
+ * resto queda en una cuota de cierre al final); con `term` se usa el N° de cuotas.
  */
 export function POST(req: Request) {
   return runHandler(async () => {
@@ -38,17 +41,26 @@ export function POST(req: Request) {
     const name = String(body.name || "").trim();
     const capital = Number(body.capital);
     const returnPct = Number(body.returnPct);
-    const term = Number(body.term);
     const frequency = String(body.frequency || "").toUpperCase() as LoanFrequency;
     const startDate = body.startDate ? new Date(body.startDate) : new Date();
+
+    const hasInstallmentAmount =
+      body.installmentAmount != null && Number(body.installmentAmount) > 0;
+    const installmentAmount = hasInstallmentAmount
+      ? Number(body.installmentAmount)
+      : undefined;
+    const term = body.term != null ? Number(body.term) : undefined;
 
     if (name.length < 3) return errorResponse("Nombre muy corto.", 400);
     if (!Number.isFinite(capital) || capital <= 0)
       return errorResponse("Capital debe ser mayor a 0.", 400);
     if (!Number.isFinite(returnPct) || returnPct < 0)
       return errorResponse("Retorno inválido.", 400);
-    if (!Number.isInteger(term) || term < 1)
-      return errorResponse("Número de cuotas inválido.", 400);
+    if (!hasInstallmentAmount && (!Number.isInteger(term) || (term ?? 0) < 1))
+      return errorResponse(
+        "Indica 'term' (N° de cuotas) o 'installmentAmount' (monto por cuota).",
+        400,
+      );
     if (!FREQUENCIES.includes(frequency))
       return errorResponse("Frecuencia inválida (DAILY|WEEKLY|BIWEEKLY|MONTHLY).", 400);
     if (Number.isNaN(startDate.getTime()))
@@ -66,6 +78,7 @@ export function POST(req: Request) {
         capital,
         returnPct,
         term,
+        installmentAmount,
         frequency,
         startDate,
         collectWeekdays,

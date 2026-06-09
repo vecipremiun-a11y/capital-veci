@@ -64,11 +64,18 @@ export default async function OperationsPage({
         title="Operaciones comerciales"
         description="Negocios y operaciones donde se invierte el capital administrado. Cada operación mueve dinero entre liquidez y capital comprometido."
       >
-        <Button asChild variant="gold">
-          <Link href="/operaciones/nuevo">
-            <Plus /> Nueva operación
-          </Link>
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button asChild variant="gold">
+            <Link href="/operaciones/nuevo?tipo=prestamo">
+              <Coins /> Nuevo préstamo
+            </Link>
+          </Button>
+          <Button asChild variant="outline">
+            <Link href="/operaciones/nuevo">
+              <Plus /> Nueva operación
+            </Link>
+          </Button>
+        </div>
       </PageHeader>
 
       {/* KPIs principales */}

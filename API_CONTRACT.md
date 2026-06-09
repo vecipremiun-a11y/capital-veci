@@ -23,11 +23,17 @@ el dashboard de operaciones automáticamente.
 - `GET /loans/:id` → `{ loan:{ ...resumen, installments:[{id,sequence,dueDate,
   amount,paidAmount,remaining,status,paidDate}], payments:[{id,amount,method,date}] } }`
 - `POST /loans` → `{ loan }` (201). Body:
-  `{ name, capital, returnPct, term, frequency(DAILY|WEEKLY|BIWEEKLY|MONTHLY),
-     startDate, borrowerName?, borrowerPhone?, riskLevel?, collectWeekdays?(DAILY), description? }`
-  - total = `round(capital*(1+returnPct/100))`; cuota = `floor(total/term)`, la
-    última absorbe el redondeo. Espaciado: DAILY +1d (días hábiles), WEEKLY +7d,
-    BIWEEKLY +15d, MONTHLY +1 mes.
+  `{ name, capital, returnPct, frequency(DAILY|WEEKLY|BIWEEKLY|MONTHLY),
+     term? | installmentAmount?, startDate, borrowerName?, borrowerPhone?,
+     riskLevel?, collectWeekdays?(DAILY), description? }`
+  - El calendario se define con **uno** de los dos: `term` (N° de cuotas) o
+    `installmentAmount` (monto redondo por cuota). Si va `installmentAmount`,
+    `term` se ignora/deriva.
+  - total = `round(capital*(1+returnPct/100))`.
+    - Por `term`: cuota = `floor(total/term)`, la última absorbe el redondeo.
+    - Por `installmentAmount`: `floor(total/monto)` cuotas del monto + una cuota
+      de cierre con el resto (si resto > 0). Máx. 365 cuotas.
+    Espaciado: DAILY +1d (días hábiles), WEEKLY +7d, BIWEEKLY +15d, MONTHLY +1 mes.
   - Crea Operation + LoanInstallment(s) + CapitalMovement(COMMITTED) en una transacción.
   - La frecuencia se guarda como etiqueta `[freq:X]` dentro de `description`
     (sin columna propia todavía) y se lee de vuelta en los GET.
