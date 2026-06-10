@@ -34,6 +34,22 @@ function addMonths(d: Date, months: number): Date {
   return r;
 }
 
+/**
+ * Día-calendario "YYYY-MM-DD" de una fecha en una zona horaria dada.
+ * Para "hoy" se usa "America/Santiago" (el corte es la medianoche chilena).
+ * Para los dueDate (guardados como medianoche UTC) se usa "UTC", que es su día
+ * calendario real. Comparar ambos strings da la igualdad de día correcta.
+ */
+function calendarDay(date: Date, timeZone: string): string {
+  // en-CA produce el formato YYYY-MM-DD.
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+}
+
 const FREQUENCY_LABEL: Record<LoanFrequency, string> = {
   DAILY: "Diario",
   WEEKLY: "Semanal",
@@ -180,34 +196,48 @@ export async function loanSummary() {
     }
   }
 
+  // "Hoy" en zona horaria de Chile (el corte es la medianoche chilena, no UTC).
+  const todaySantiago = calendarDay(now, "America/Santiago");
+
   // Métricas sobre préstamos activos (capital comprometido y por venir).
   let lentCapital = 0;
   let totalToCollect = 0;
-  const upcoming: {
+  type UpcomingItem = {
     operationId: string;
     borrowerName: string | null;
     sequence: number;
     dueDate: Date;
     remaining: number;
-  }[] = [];
+  };
+  const upcoming: UpcomingItem[] = [];
+  // Todas las cuotas que vencen HOY (Chile) y tienen saldo pendiente, de todos
+  // los préstamos activos. No es "la próxima por préstamo": son TODAS las de hoy.
+  const dueToday: UpcomingItem[] = [];
   for (const op of active) {
     lentCapital += op.capitalUsed;
     for (const c of op.installments) {
       totalToCollect += c.amount;
       const remaining = Math.max(c.amount - c.paidAmount, 0);
-      if (remaining > 0) {
-        upcoming.push({
-          operationId: op.id,
-          borrowerName: op.borrowerName,
-          sequence: c.sequence,
-          dueDate: c.dueDate,
-          remaining,
-        });
+      if (remaining <= 0) continue; // ya pagada (PAID o sin saldo)
+      const item: UpcomingItem = {
+        operationId: op.id,
+        borrowerName: op.borrowerName,
+        sequence: c.sequence,
+        dueDate: c.dueDate,
+        remaining,
+      };
+      upcoming.push(item);
+      // dueDate se guarda como medianoche UTC → su día calendario es el UTC.
+      if (calendarDay(new Date(c.dueDate), "UTC") === todaySantiago) {
+        dueToday.push(item);
       }
     }
   }
 
   upcoming.sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
+  dueToday.sort((a, b) =>
+    (a.borrowerName ?? "").localeCompare(b.borrowerName ?? "") || a.sequence - b.sequence,
+  );
 
   const borrowers = new Set(
     active.map((o) => o.borrowerName || o.code).filter(Boolean),
@@ -223,6 +253,8 @@ export async function loanSummary() {
     activeLoansCount: active.length,
     overdueCount,
     upcoming: upcoming.slice(0, 10),
+    // Cobros de hoy (Chile): todas las cuotas que vencen hoy con saldo. Sin recorte.
+    dueToday,
   };
 }
 

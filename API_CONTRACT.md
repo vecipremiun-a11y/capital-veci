@@ -62,7 +62,14 @@ el dashboard de operaciones automáticamente.
 ## Resumen
 - `GET /summary` → `{ outstanding, lentCapital, estimatedProfit,
   collectedThisMonth, totalCollected, clientsCount, activeLoansCount,
-  overdueCount, upcoming:[{operationId,borrowerName,sequence,dueDate,remaining}] }`
+  overdueCount, upcoming:[{operationId,borrowerName,sequence,dueDate,remaining}],
+  dueToday:[{operationId,borrowerName,sequence,dueDate,remaining}] }`
+  - `dueToday`: **todas** las cuotas que vencen HOY con `remaining > 0`, de todos
+    los préstamos activos (excluye FINISHED/LOSS y las PAID). No es "la próxima por
+    préstamo" y **no tiene recorte**. Mismo shape que `upcoming` (mismo parser);
+    `dueDate` es la fecha-calendario (medianoche UTC, igual que en `upcoming`).
+  - "Hoy" se calcula en **America/Santiago** (corte a la medianoche chilena), no en
+    UTC. Si no hay cobros hoy, `dueToday: []` (siempre presente).
 
 ## Inversiones (solo lectura)
 - `GET /investors` → `{ investors:[{ id, fullName, rut, email, phone, status,
