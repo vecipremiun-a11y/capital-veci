@@ -36,18 +36,28 @@ export function formatNumber(value: number | null | undefined): string {
   return new Intl.NumberFormat("es-CL").format(value);
 }
 
+// Zona horaria fija para que las fechas se vean igual en local y en producción
+// (Vercel corre en UTC; sin esto las horas se corren). La app es de Chile.
+const TIME_ZONE = "America/Santiago";
+
+// Las fechas "solo día" (vencimientos, inicio, etc.) se guardan como medianoche
+// UTC, así que se formatean en UTC para mostrar el día calendario correcto.
 const dateFmt = new Intl.DateTimeFormat("es-CL", {
   day: "2-digit",
   month: "short",
   year: "numeric",
+  timeZone: "UTC",
 });
 
+// Las marcas de tiempo reales (cobros, pagos, movimientos) se muestran en hora
+// local de Chile, sin importar dónde corra el servidor.
 const dateTimeFmt = new Intl.DateTimeFormat("es-CL", {
   day: "2-digit",
   month: "short",
   year: "numeric",
   hour: "2-digit",
   minute: "2-digit",
+  timeZone: TIME_ZONE,
 });
 
 export function formatDate(date: Date | string | null | undefined): string {

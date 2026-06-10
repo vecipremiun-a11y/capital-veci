@@ -1,6 +1,11 @@
 import "server-only";
 import { db } from "@/lib/db";
-import { buildLoanSchedule as buildSchedule, type LoanFrequency } from "@/lib/loans";
+import { ApiError } from "@/lib/api/http";
+import {
+  buildLoanSchedule as buildSchedule,
+  inferFrequency,
+  type LoanFrequency,
+} from "@/lib/loans";
 import {
   DEFAULT_COLLECT_WEEKDAYS,
   OPERATION_COMMITTED_STATUSES,
@@ -27,17 +32,6 @@ function addMonths(d: Date, months: number): Date {
   const r = new Date(d);
   r.setMonth(r.getMonth() + months);
   return r;
-}
-
-/** Infiere la frecuencia mirando la separación entre las dos primeras cuotas. */
-function inferFrequency(dates: Date[]): LoanFrequency {
-  if (dates.length < 2) return "MONTHLY";
-  const gap =
-    (dates[1].getTime() - dates[0].getTime()) / (1000 * 60 * 60 * 24);
-  if (gap <= 2) return "DAILY";
-  if (gap <= 10) return "WEEKLY";
-  if (gap <= 20) return "BIWEEKLY";
-  return "MONTHLY";
 }
 
 const FREQUENCY_LABEL: Record<LoanFrequency, string> = {
@@ -414,6 +408,320 @@ export async function collectLoan(
   });
 
   return { applied: appliedTotal, leftover: left, installmentsTouched: updates.length };
+}
+
+/**
+ * Revierte TODOS los abonos de una cuota (vuelve a PENDIENTE) y la descuenta de
+ * los eventos de cobro (LoanPayment), borrando los que queden en cero. Misma
+ * lógica que `revertInstallmentPaid` de la web. Devuelve el préstamo actualizado.
+ */
+export async function revertLoanInstallment(installmentId: string, userId?: string) {
+  const inst = await db.loanInstallment.findUnique({ where: { id: installmentId } });
+  if (!inst) throw new ApiError("Cuota no encontrada.", 404);
+
+  const events = await db.loanPayment.findMany({
+    where: { operationId: inst.operationId },
+  });
+
+  await db.$transaction(async (tx) => {
+    for (const ev of events) {
+      let allocs: { sequence: number; installmentId: string; amount: number }[];
+      try {
+        allocs = JSON.parse(ev.allocations);
+      } catch {
+        continue;
+      }
+      if (!allocs.some((a) => a.installmentId === installmentId)) continue;
+      const remaining = allocs.filter((a) => a.installmentId !== installmentId);
+      const newAmount = remaining.reduce((s, a) => s + a.amount, 0);
+      if (newAmount <= 0) {
+        await tx.loanPayment.delete({ where: { id: ev.id } });
+      } else {
+        await tx.loanPayment.update({
+          where: { id: ev.id },
+          data: { amount: newAmount, allocations: JSON.stringify(remaining) },
+        });
+      }
+    }
+    await tx.loanInstallment.update({
+      where: { id: installmentId },
+      data: { status: "PENDING", paidAmount: 0, paidDate: null, method: null },
+    });
+    await tx.auditLog.create({
+      data: {
+        userId: userId ?? null,
+        action: "REVERT",
+        entity: "LoanInstallment",
+        entityId: installmentId,
+        detail: `Cuota #${inst.sequence} revertida (API)`,
+      },
+    });
+  });
+
+  return getLoan(inst.operationId);
+}
+
+/**
+ * Edita un préstamo. Reglas (iguales que la web):
+ *   • No se edita un préstamo cerrado (FINISHED/LOSS).
+ *   • Si tiene cobros y se intentan cambiar campos financieros → 409 (hay que
+ *     revertir los cobros primero). Sin campos financieros → solo metadata.
+ *   • Sin cobros → regenera el calendario y corrige el asiento COMMITTED.
+ * Body parcial: { name?, capital?, returnPct?, startDate?, frequency?,
+ *   term? | installmentAmount?, collectWeekdays?, borrowerName?, borrowerPhone?,
+ *   riskLevel?, description? }
+ */
+export async function updateLoan(
+  id: string,
+  body: Record<string, unknown>,
+  userId?: string,
+) {
+  const op = await db.operation.findUnique({
+    where: { id },
+    include: {
+      installments: { orderBy: { sequence: "asc" } },
+      loanPayments: { select: { id: true } },
+    },
+  });
+  if (!op) throw new ApiError("Préstamo no encontrado.", 404);
+  if (op.status === "FINISHED" || op.status === "LOSS") {
+    throw new ApiError("No se puede editar un préstamo cerrado.", 409);
+  }
+
+  const hasCollections =
+    op.installments.some((i) => i.paidAmount > 0) || op.loanPayments.length > 0;
+
+  const present = (k: string) =>
+    body[k] !== undefined && body[k] !== null && body[k] !== "";
+  const financialKeys = [
+    "capital",
+    "returnPct",
+    "startDate",
+    "frequency",
+    "term",
+    "installmentAmount",
+    "collectWeekdays",
+  ];
+  const wantsFinancial = financialKeys.some(present);
+  if (hasCollections && wantsFinancial) {
+    throw new ApiError(
+      "El préstamo tiene cobros: revierte los cobros antes de cambiar monto, fechas o cuotas.",
+      409,
+    );
+  }
+
+  // -------- Metadata (siempre) --------
+  const borrowerName =
+    body.borrowerName !== undefined
+      ? body.borrowerName
+        ? String(body.borrowerName)
+        : null
+      : op.borrowerName;
+  const borrowerPhone =
+    body.borrowerPhone !== undefined
+      ? body.borrowerPhone
+        ? String(body.borrowerPhone)
+        : null
+      : op.borrowerPhone;
+  const riskLevel =
+    body.riskLevel && ["LOW", "MEDIUM", "HIGH"].includes(String(body.riskLevel))
+      ? String(body.riskLevel)
+      : op.riskLevel;
+  const name = body.name
+    ? String(body.name)
+    : borrowerName
+      ? `Préstamo a ${borrowerName}`
+      : op.name;
+
+  // -------- Solo metadata (hay cobros, o no se tocó nada financiero) --------
+  if (!wantsFinancial) {
+    const currentFreq =
+      readFrequencyTag(op.description) ??
+      inferFrequency(op.installments.map((i) => i.dueDate));
+    const description =
+      body.description !== undefined
+        ? composeDescription(
+            body.description ? String(body.description) : null,
+            currentFreq,
+          )
+        : op.description;
+    await db.$transaction(async (tx) => {
+      await tx.operation.update({
+        where: { id },
+        data: { name, borrowerName, borrowerPhone, riskLevel, description },
+      });
+      await tx.auditLog.create({
+        data: {
+          userId: userId ?? null,
+          action: "UPDATE",
+          entity: "Operation",
+          entityId: id,
+          detail: `Préstamo ${op.code} editado (API, solo datos)`,
+        },
+      });
+    });
+    return getLoan(id);
+  }
+
+  // -------- Edición financiera (sin cobros): regenera el calendario --------
+  const capital = present("capital") ? Number(body.capital) : op.capitalUsed;
+  const returnPct = present("returnPct")
+    ? Number(body.returnPct)
+    : op.expectedReturn;
+  const startDate = present("startDate")
+    ? new Date(String(body.startDate))
+    : op.startDate;
+  const frequency = (
+    present("frequency")
+      ? String(body.frequency).toUpperCase()
+      : (readFrequencyTag(op.description) ??
+        inferFrequency(op.installments.map((i) => i.dueDate)))
+  ) as LoanFrequency;
+  const installmentAmount = present("installmentAmount")
+    ? Number(body.installmentAmount)
+    : undefined;
+  const byAmount = (installmentAmount ?? 0) > 0;
+  const term = present("term")
+    ? Number(body.term)
+    : byAmount
+      ? 0
+      : op.installments.length;
+  const collectWeekdays = Array.isArray(body.collectWeekdays)
+    ? (body.collectWeekdays as unknown[])
+        .map(Number)
+        .filter((n) => Number.isInteger(n) && n >= 0 && n <= 6)
+    : op.collectWeekdays
+      ? op.collectWeekdays
+          .split(",")
+          .map(Number)
+          .filter((n) => Number.isInteger(n) && n >= 0 && n <= 6)
+      : [...DEFAULT_COLLECT_WEEKDAYS];
+
+  if (!Number.isFinite(capital) || capital <= 0)
+    throw new ApiError("Capital inválido.", 400);
+  if (!Number.isFinite(returnPct) || returnPct < 0)
+    throw new ApiError("Retorno inválido.", 400);
+  if (Number.isNaN(startDate.getTime()))
+    throw new ApiError("Fecha de inicio inválida.", 400);
+  if (!["DAILY", "WEEKLY", "BIWEEKLY", "MONTHLY"].includes(frequency))
+    throw new ApiError("Frecuencia inválida.", 400);
+
+  const schedule = buildSchedule({
+    capital,
+    returnPct,
+    startDate,
+    frequency,
+    termDays: term,
+    collectWeekdays,
+    mode: byAmount ? "DAILY_AMOUNT" : "TERM",
+    dailyAmount: installmentAmount ?? 0,
+  });
+  if (schedule.installments.length === 0)
+    throw new ApiError("No se pudo generar el calendario de cuotas.", 400);
+  if (schedule.installments.length > 365)
+    throw new ApiError(
+      "El monto por cuota es muy bajo: genera demasiadas cuotas.",
+      400,
+    );
+
+  const endDate = schedule.endDate ?? op.endDate ?? addMonths(startDate, 1);
+  const description = composeDescription(
+    body.description !== undefined
+      ? body.description
+        ? String(body.description)
+        : null
+      : op.description,
+    frequency,
+  );
+
+  await db.$transaction(async (tx) => {
+    await tx.operation.update({
+      where: { id },
+      data: {
+        name,
+        borrowerName,
+        borrowerPhone,
+        riskLevel,
+        description,
+        capitalUsed: capital,
+        expectedReturn: returnPct,
+        startDate,
+        endDate,
+        isDailyLoan: true,
+        dailyTermDays: schedule.installments.length,
+        collectWeekdays:
+          frequency === "DAILY" ? collectWeekdays.join(",") : null,
+      },
+    });
+    await tx.loanInstallment.deleteMany({ where: { operationId: id } });
+    await tx.loanInstallment.createMany({
+      data: schedule.installments.map((c) => ({
+        operationId: id,
+        sequence: c.sequence,
+        dueDate: c.dueDate,
+        amount: c.amount,
+        status: "PENDING",
+      })),
+    });
+    await tx.capitalMovement.updateMany({
+      where: { operationId: id, type: "COMMITTED" },
+      data: { amount: capital, date: startDate },
+    });
+    await tx.auditLog.create({
+      data: {
+        userId: userId ?? null,
+        action: "UPDATE",
+        entity: "Operation",
+        entityId: id,
+        detail: `Préstamo ${op.code} editado (API) — capital ${capital} · ${schedule.installments.length} cuota(s)`,
+      },
+    });
+  });
+
+  return getLoan(id);
+}
+
+/**
+ * Elimina un préstamo creado por error. Solo si NO tiene cobros y NO está
+ * cerrado. Borra el asiento COMMITTED (FK SetNull) y, por cascade, cuotas,
+ * participantes y eventos de cobro. Misma regla que `deleteOperation` de la web.
+ */
+export async function deleteLoan(id: string, userId?: string) {
+  const op = await db.operation.findUnique({
+    where: { id },
+    include: {
+      installments: { select: { paidAmount: true } },
+      loanPayments: { select: { id: true } },
+    },
+  });
+  if (!op) throw new ApiError("Préstamo no encontrado.", 404);
+  if (op.status === "FINISHED" || op.status === "LOSS") {
+    throw new ApiError("No se puede eliminar un préstamo cerrado.", 409);
+  }
+  const hasCollections =
+    op.installments.some((i) => i.paidAmount > 0) || op.loanPayments.length > 0;
+  if (hasCollections) {
+    throw new ApiError(
+      "No se puede eliminar: tiene cobros registrados. Revierte los cobros primero.",
+      409,
+    );
+  }
+
+  await db.$transaction(async (tx) => {
+    await tx.capitalMovement.deleteMany({ where: { operationId: id } });
+    await tx.operation.delete({ where: { id } });
+    await tx.auditLog.create({
+      data: {
+        userId: userId ?? null,
+        action: "DELETE",
+        entity: "Operation",
+        entityId: id,
+        detail: `Préstamo ${op.code} (${op.name}) eliminado (API)`,
+      },
+    });
+  });
+
+  return { ok: true };
 }
 
 // ---------- Inversiones (lectura) ----------

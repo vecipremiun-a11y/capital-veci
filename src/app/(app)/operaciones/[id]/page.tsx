@@ -9,6 +9,7 @@ import {
   CalendarClock,
   CheckCircle2,
   Coins,
+  Pencil,
   Phone,
   PiggyBank,
   Receipt,
@@ -32,6 +33,7 @@ import {
   RISK_LABELS,
 } from "@/lib/constants";
 import { InstallmentRowActions } from "./installment-row-actions";
+import { DeleteOperationButton } from "./delete-operation-button";
 import { PageHeader } from "@/components/shared/page-header";
 import { StatusBadge, RiskBadge } from "@/components/shared/status-badge";
 import {
@@ -103,6 +105,8 @@ export default async function OperationDetail({
   ).length;
   const allPaid =
     installments.length > 0 && paidCount === installments.length;
+  // Una operación se puede eliminar solo si no tiene cobros ni está cerrada.
+  const hasCollections = collected > 0 || op.loanPayments.length > 0;
 
   return (
     <div className="space-y-6">
@@ -119,7 +123,17 @@ export default async function OperationDetail({
         <div className="flex flex-wrap items-center gap-2">
           <RiskBadge level={op.riskLevel} />
           <StatusBadge status={op.status} />
+          {!isClosed && (
+            <Button asChild variant="outline" size="sm">
+              <Link href={`/operaciones/${op.id}/editar`}>
+                <Pencil className="size-3.5" /> Editar
+              </Link>
+            </Button>
+          )}
           {!isClosed && <OperationActions operationId={op.id} status={op.status} capitalUsed={op.capitalUsed} />}
+          {!isClosed && !hasCollections && (
+            <DeleteOperationButton operationId={op.id} label={op.name} />
+          )}
         </div>
       </PageHeader>
 

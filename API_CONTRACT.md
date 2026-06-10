@@ -40,6 +40,24 @@ el dashboard de operaciones automáticamente.
 - `POST /loans/:id/collect` → `{ result:{ applied, leftover, installmentsTouched } }`.
   Body `{ installmentId, amount, method? }`. El excedente cae en cascada a las
   cuotas siguientes. Crea un `LoanPayment` con `allocations`. No mueve liquidez.
+- `POST /loans/:id/revert` → `{ loan }`. Body `{ installmentId }`. Revierte TODOS
+  los abonos de esa cuota (vuelve a `PENDING`, `paidAmount=0`) y la descuenta de
+  los `LoanPayment` (borra los que queden en 0). Úsalo para liberar un préstamo y
+  poder editarlo. 404 si la cuota no existe.
+- `PATCH /loans/:id` → `{ loan }`. Body **parcial**:
+  `{ name?, capital?, returnPct?, startDate?, frequency?, term? | installmentAmount?,
+     collectWeekdays?, borrowerName?, borrowerPhone?, riskLevel?, description? }`.
+  - Campos **financieros**: `capital, returnPct, startDate, frequency, term,
+    installmentAmount, collectWeekdays`. Los demás son metadata.
+  - Si el préstamo tiene cobros y el body trae algún campo financiero → **409**
+    (revierte los cobros primero con `/revert`). Solo metadata → siempre permitido.
+  - Sin cobros: se **regenera** el calendario (borra y recrea cuotas) con la misma
+    lógica de `POST /loans`; los campos no enviados conservan su valor actual; se
+    corrige el asiento COMMITTED (capital + fecha). Devuelve el préstamo completo.
+  - 409 si el préstamo está cerrado (FINISHED/LOSS). 404 si no existe.
+- `DELETE /loans/:id` → `{ ok:true }`. Elimina el préstamo (cascade: cuotas,
+  participantes, cobros; borra el asiento COMMITTED). **409** si tiene cobros o
+  está cerrado. 404 si no existe.
 
 ## Resumen
 - `GET /summary` → `{ outstanding, lentCapital, estimatedProfit,

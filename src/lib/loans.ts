@@ -183,3 +183,18 @@ export function buildLoanSchedule(input: LoanScheduleInput): DailyLoanSchedule {
 export function buildDailyLoanSchedule(input: DailyLoanInput): DailyLoanSchedule {
   return buildLoanSchedule({ ...input, frequency: "DAILY" });
 }
+
+/**
+ * Infiere la frecuencia mirando la separación entre las dos primeras cuotas.
+ * Útil para precargar la frecuencia al editar (la web no la persiste como columna).
+ */
+export function inferFrequency(dates: Date[]): LoanFrequency {
+  if (dates.length < 2) return "MONTHLY";
+  const gap =
+    (new Date(dates[1]).getTime() - new Date(dates[0]).getTime()) /
+    (1000 * 60 * 60 * 24);
+  if (gap <= 2) return "DAILY";
+  if (gap <= 10) return "WEEKLY";
+  if (gap <= 20) return "BIWEEKLY";
+  return "MONTHLY";
+}

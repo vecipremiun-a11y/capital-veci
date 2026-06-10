@@ -344,6 +344,286 @@ export async function createOperation(
 }
 
 // =========================================================
+//  UPDATE — Editar una operación / préstamo (con resguardos)
+//
+//  REGLAS:
+//    • No se editan operaciones cerradas (FINISHED/LOSS).
+//    • Si el préstamo YA tiene cobros, lo FINANCIERO queda bloqueado: solo se
+//      actualizan datos del cliente, riesgo y nota. Para corregir montos/fechas
+//      hay que revertir los cobros primero (botón ↩ por cuota).
+//    • Sin cobros: se regenera el calendario, se actualiza el asiento COMMITTED
+//      (para que liquidez/timeline cuadren) y se reescriben los participantes.
+//    • Todo cambio queda en AuditLog.
+// =========================================================
+export async function updateOperation(
+  id: string,
+  _prev: OperationFormState,
+  formData: FormData,
+): Promise<OperationFormState> {
+  const session = await requirePermission("operations");
+
+  const parsed = createSchema.safeParse({
+    name: formData.get("name"),
+    category: formData.get("category"),
+    description: formData.get("description"),
+    business: formData.get("business"),
+    responsibleId: formData.get("responsibleId") || null,
+    capitalUsed: formData.get("capitalUsed"),
+    expectedReturn: formData.get("expectedReturn"),
+    durationMonths: formData.get("durationMonths") || undefined,
+    startDate: formData.get("startDate"),
+    riskLevel: formData.get("riskLevel"),
+    status: formData.get("status") || "ACTIVE",
+    participants: formData.get("participants"),
+    isDailyLoan: formData.get("isDailyLoan") === "true",
+    frequency: formData.get("frequency") || "DAILY",
+    dailyMode: formData.get("dailyMode") || "TERM",
+    dailyTermDays: formData.get("dailyTermDays") || undefined,
+    dailyAmount: formData.get("dailyAmount") || undefined,
+    collectWeekdays: formData.get("collectWeekdays"),
+    borrowerName: formData.get("borrowerName"),
+    borrowerPhone: formData.get("borrowerPhone"),
+  });
+
+  if (!parsed.success) {
+    const fieldErrors: Record<string, string> = {};
+    for (const issue of parsed.error.issues)
+      fieldErrors[String(issue.path[0])] = issue.message;
+    return { error: "Revisa los campos.", fieldErrors };
+  }
+
+  const data = parsed.data;
+
+  const op = await db.operation.findUnique({
+    where: { id },
+    include: { installments: true, loanPayments: true },
+  });
+  if (!op) return { error: "Operación no encontrada." };
+  if (op.status === "FINISHED" || op.status === "LOSS") {
+    return { error: "No se puede editar una operación cerrada." };
+  }
+
+  const hasCollections =
+    op.installments.some((i) => i.paidAmount > 0) || op.loanPayments.length > 0;
+
+  if (data.category === "LOANS" && !data.borrowerName?.trim()) {
+    return { error: "Indica el cliente/deudor del préstamo." };
+  }
+
+  // El responsable no se borra al editar: se conserva si no se eligió otro.
+  const responsibleId =
+    data.responsibleId ||
+    op.responsibleId ||
+    (data.category === "LOANS" ? session.sub : null);
+
+  // -------- Caso bloqueado: solo metadata (hay cobros registrados) --------
+  if (hasCollections) {
+    await db.$transaction(async (tx) => {
+      await tx.operation.update({
+        where: { id },
+        data: {
+          name: data.name,
+          description: data.description || null,
+          business: data.business || null,
+          responsibleId,
+          riskLevel: data.riskLevel,
+          borrowerName: data.borrowerName || null,
+          borrowerPhone: data.borrowerPhone || null,
+        },
+      });
+      await tx.auditLog.create({
+        data: {
+          userId: session.sub,
+          action: "UPDATE",
+          entity: "Operation",
+          entityId: id,
+          detail: `Operación ${op.code} editada (solo datos; financiero bloqueado por cobros)`,
+        },
+      });
+    });
+
+    revalidatePath(`/operaciones/${id}`);
+    revalidatePath("/operaciones");
+    revalidatePath("/operaciones/cobros");
+    redirect(`/operaciones/${id}`);
+  }
+
+  // -------- Caso editable: se puede regenerar el calendario --------
+  const participants = parseParticipants(data.participants);
+  const totalParticipants = participants.reduce((s, p) => s + p.amount, 0);
+  if (totalParticipants > data.capitalUsed) {
+    return {
+      error: `La suma de aportes (${totalParticipants}) excede el capital de la operación (${data.capitalUsed}).`,
+    };
+  }
+
+  const startDate = new Date(data.startDate);
+  const isDailyLoan = data.isDailyLoan === true;
+  const frequency = data.frequency ?? "DAILY";
+  const collectWeekdays = parseWeekdays(data.collectWeekdays);
+  const dailyMode = data.dailyMode ?? "TERM";
+  const termDays = data.dailyTermDays ?? 0;
+  const dailyAmount = data.dailyAmount ?? 0;
+
+  if (isDailyLoan) {
+    if (dailyMode === "DAILY_AMOUNT" && dailyAmount <= 0) {
+      return { error: "Indica un monto por cuota mayor a 0." };
+    }
+    if (dailyMode === "TERM" && termDays <= 0) {
+      return { error: "Indica un número de cuotas válido." };
+    }
+  }
+
+  const schedule = isDailyLoan
+    ? buildLoanSchedule({
+        capital: data.capitalUsed,
+        returnPct: data.expectedReturn,
+        startDate,
+        frequency,
+        termDays,
+        collectWeekdays,
+        mode: dailyMode,
+        dailyAmount,
+      })
+    : null;
+
+  if (isDailyLoan && (!schedule || schedule.installments.length === 0)) {
+    return {
+      error: "No se pudo generar el calendario de cuotas. Revisa los datos.",
+    };
+  }
+  if (schedule && schedule.installments.length > 365) {
+    return {
+      error: "El monto por cuota es muy bajo: genera demasiadas cuotas. Súbelo.",
+    };
+  }
+
+  const endDate = schedule?.endDate ?? addMonths(startDate, data.durationMonths);
+
+  await db.$transaction(async (tx) => {
+    await tx.operation.update({
+      where: { id },
+      data: {
+        name: data.name,
+        category: data.category,
+        description: data.description || null,
+        business: data.business || null,
+        responsibleId,
+        capitalUsed: data.capitalUsed,
+        expectedReturn: data.expectedReturn,
+        startDate,
+        endDate,
+        riskLevel: data.riskLevel,
+        isDailyLoan,
+        dailyTermDays: isDailyLoan ? schedule!.installments.length : null,
+        collectWeekdays:
+          isDailyLoan && frequency === "DAILY" ? collectWeekdays.join(",") : null,
+        borrowerName: isDailyLoan ? data.borrowerName || null : null,
+        borrowerPhone: isDailyLoan ? data.borrowerPhone || null : null,
+      },
+    });
+
+    // Regenerar calendario (seguro: sin cobros) — borra y recrea.
+    await tx.loanInstallment.deleteMany({ where: { operationId: id } });
+    if (schedule) {
+      await tx.loanInstallment.createMany({
+        data: schedule.installments.map((c) => ({
+          operationId: id,
+          sequence: c.sequence,
+          dueDate: c.dueDate,
+          amount: c.amount,
+          status: "PENDING",
+        })),
+      });
+    }
+
+    // Asiento COMMITTED corregido (monto + fecha) para que liquidez/timeline cuadren.
+    await tx.capitalMovement.updateMany({
+      where: { operationId: id, type: "COMMITTED" },
+      data: { amount: data.capitalUsed, date: startDate },
+    });
+
+    // Reescribir participantes.
+    await tx.operationParticipant.deleteMany({ where: { operationId: id } });
+    if (participants.length > 0) {
+      await tx.operationParticipant.createMany({
+        data: participants.map((p) => ({
+          operationId: id,
+          investorId: p.investorId,
+          amount: p.amount,
+        })),
+      });
+    }
+
+    await tx.auditLog.create({
+      data: {
+        userId: session.sub,
+        action: "UPDATE",
+        entity: "Operation",
+        entityId: id,
+        detail: `Operación ${op.code} editada — capital ${data.capitalUsed} · ${schedule?.installments.length ?? 0} cuota(s)`,
+      },
+    });
+  });
+
+  revalidatePath(`/operaciones/${id}`);
+  revalidatePath("/operaciones");
+  revalidatePath("/operaciones/cobros");
+  revalidatePath("/liquidez");
+  revalidatePath("/dashboard");
+  redirect(`/operaciones/${id}`);
+}
+
+// =========================================================
+//  DELETE — Eliminar una operación creada por error
+//
+//  Solo si NO tiene cobros y NO está cerrada. Libera el capital comprometido
+//  (al desaparecer del cálculo derivado) y borra su asiento COMMITTED para no
+//  dejar movimientos huérfanos. Queda registrado en AuditLog.
+// =========================================================
+export async function deleteOperation(id: string) {
+  const session = await requirePermission("operations");
+
+  const op = await db.operation.findUnique({
+    where: { id },
+    include: { installments: true, loanPayments: true },
+  });
+  if (!op) throw new Error("Operación no encontrada.");
+  if (op.status === "FINISHED" || op.status === "LOSS") {
+    throw new Error("No se puede eliminar una operación cerrada.");
+  }
+  const hasCollections =
+    op.installments.some((i) => i.paidAmount > 0) || op.loanPayments.length > 0;
+  if (hasCollections) {
+    throw new Error(
+      "No se puede eliminar: tiene cobros registrados. Revierte los cobros primero.",
+    );
+  }
+
+  await db.$transaction(async (tx) => {
+    // El FK de CapitalMovement es SetNull: hay que borrarlos a mano.
+    await tx.capitalMovement.deleteMany({ where: { operationId: id } });
+    // El resto (cuotas, participantes, loanPayments) cae por cascade.
+    await tx.operation.delete({ where: { id } });
+    await tx.auditLog.create({
+      data: {
+        userId: session.sub,
+        action: "DELETE",
+        entity: "Operation",
+        entityId: id,
+        detail: `Operación ${op.code} (${op.name}) eliminada`,
+      },
+    });
+  });
+
+  revalidatePath("/operaciones");
+  revalidatePath("/operaciones/cobros");
+  revalidatePath("/liquidez");
+  revalidatePath("/dashboard");
+  redirect("/operaciones");
+}
+
+// =========================================================
 //  FINALIZE — Cerrar una operación con resultado positivo
 //
 //  EFECTO FINANCIERO:

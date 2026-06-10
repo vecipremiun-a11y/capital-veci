@@ -15,7 +15,11 @@ import {
   Wallet,
   TrendingUp,
 } from "lucide-react";
-import { createOperation, type OperationFormState } from "../actions";
+import {
+  createOperation,
+  updateOperation,
+  type OperationFormState,
+} from "../actions";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -39,27 +43,67 @@ type Investor = { id: string; fullName: string; investedCapital: number };
 type Staff = { id: string; name: string; role: string };
 type Participant = { investorId: string; amount: number };
 
-function SubmitButton({ label }: { label: string }) {
+function SubmitButton({
+  label,
+  pendingLabel,
+}: {
+  label: string;
+  pendingLabel: string;
+}) {
   const { pending } = useFormStatus();
   return (
     <Button type="submit" variant="gold" disabled={pending}>
       {pending && <Loader2 className="animate-spin" />}
-      {pending ? "Creando…" : label}
+      {pending ? pendingLabel : label}
     </Button>
   );
 }
+
+export type OperationInitialValues = {
+  name: string;
+  category: string;
+  business: string | null;
+  description: string | null;
+  responsibleId: string | null;
+  riskLevel: string;
+  capitalUsed: number;
+  expectedReturn: number;
+  startDate: string; // yyyy-mm-dd
+  durationMonths: number;
+  isDailyLoan: boolean;
+  frequency: LoanFrequency;
+  termDays: number;
+  dailyAmount: number;
+  collectWeekdays: number[];
+  borrowerName: string | null;
+  borrowerPhone: string | null;
+  participants: Participant[];
+};
 
 export function OperationForm({
   investors,
   staff,
   initialCategory = "COMMERCIAL",
+  mode = "create",
+  operationId,
+  initialValues,
+  locked = false,
 }: {
   investors: Investor[];
   staff: Staff[];
   initialCategory?: string;
+  mode?: "create" | "edit";
+  operationId?: string;
+  initialValues?: OperationInitialValues;
+  locked?: boolean;
 }) {
+  const isEdit = mode === "edit";
+  const submitAction =
+    isEdit && operationId
+      ? updateOperation.bind(null, operationId)
+      : createOperation;
   const [state, action] = useActionState<OperationFormState, FormData>(
-    createOperation,
+    submitAction,
     {},
   );
   const fe = state.fieldErrors ?? {};
@@ -67,36 +111,56 @@ export function OperationForm({
   const today = new Date().toISOString().slice(0, 10);
 
   // Tipo de operación. Si es "Préstamos" el formulario se simplifica.
-  const [category, setCategory] = useState(initialCategory);
+  const [category, setCategory] = useState(
+    initialValues?.category ?? initialCategory,
+  );
   const isLoan = category === "LOANS";
 
   // Estado del formulario para el preview financiero en vivo
-  const [capitalUsed, setCapitalUsed] = useState(0);
-  const [expectedReturn, setExpectedReturn] = useState(20);
-  const [duration, setDuration] = useState(3);
-  const [startDate, setStartDate] = useState(today);
-  const [participants, setParticipants] = useState<Participant[]>([]);
+  const [capitalUsed, setCapitalUsed] = useState(initialValues?.capitalUsed ?? 0);
+  const [expectedReturn, setExpectedReturn] = useState(
+    initialValues?.expectedReturn ?? 20,
+  );
+  const [duration, setDuration] = useState(initialValues?.durationMonths ?? 3);
+  const [startDate, setStartDate] = useState(initialValues?.startDate ?? today);
+  const [participants, setParticipants] = useState<Participant[]>(
+    initialValues?.participants ?? [],
+  );
 
   // Secciones opcionales del modo préstamo
-  const [showDescription, setShowDescription] = useState(false);
-  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [showDescription, setShowDescription] = useState(
+    !!initialValues?.description,
+  );
+  const [showAdvanced, setShowAdvanced] = useState(
+    (initialValues?.participants?.length ?? 0) > 0,
+  );
 
   // Cobro diario (préstamos en cuotas). En un préstamo siempre va activo.
-  const [isDailyLoan, setIsDailyLoan] = useState(false);
+  const [isDailyLoan, setIsDailyLoan] = useState(
+    initialValues?.isDailyLoan ?? false,
+  );
   const dailyOn = isLoan || isDailyLoan;
   // Frecuencia del plan de cobro.
-  const [frequency, setFrequency] = useState<LoanFrequency>("DAILY");
+  const [frequency, setFrequency] = useState<LoanFrequency>(
+    initialValues?.frequency ?? "DAILY",
+  );
   const isDailyFreq = frequency === "DAILY";
   // Días y monto por cuota son campos ENLAZADOS: el último que edites manda y el
   // otro se calcula solo (días → monto = total/días; monto → días derivados).
   const [lastEdited, setLastEdited] = useState<"TERM" | "DAILY_AMOUNT">("TERM");
-  const [termDays, setTermDays] = useState(24);
-  const [dailyAmount, setDailyAmount] = useState(25000);
-  const [weekdays, setWeekdays] = useState<number[]>([
-    ...DEFAULT_COLLECT_WEEKDAYS,
-  ]);
-  const [borrowerName, setBorrowerName] = useState("");
-  const [borrowerPhone, setBorrowerPhone] = useState("");
+  const [termDays, setTermDays] = useState(initialValues?.termDays ?? 24);
+  const [dailyAmount, setDailyAmount] = useState(
+    initialValues?.dailyAmount ?? 25000,
+  );
+  const [weekdays, setWeekdays] = useState<number[]>(
+    initialValues?.collectWeekdays ?? [...DEFAULT_COLLECT_WEEKDAYS],
+  );
+  const [borrowerName, setBorrowerName] = useState(
+    initialValues?.borrowerName ?? "",
+  );
+  const [borrowerPhone, setBorrowerPhone] = useState(
+    initialValues?.borrowerPhone ?? "",
+  );
 
   function toggleWeekday(day: number) {
     setWeekdays((prev) =>
@@ -174,6 +238,7 @@ export function OperationForm({
         className={selectClass}
         value={category}
         onChange={(e) => setCategory(e.target.value)}
+        disabled={locked}
         required
       >
         {OPERATION_CATEGORY_OPTIONS.map((o) => (
@@ -192,7 +257,7 @@ export function OperationForm({
         id="riskLevel"
         name="riskLevel"
         className={selectClass}
-        defaultValue="MEDIUM"
+        defaultValue={initialValues?.riskLevel ?? "MEDIUM"}
         required
       >
         {Object.entries(RISK_LABELS).map(([k, l]) => (
@@ -222,6 +287,7 @@ export function OperationForm({
         step="1000"
         value={capitalUsed || ""}
         onChange={(e) => setCapitalUsed(Number(e.target.value))}
+        disabled={locked}
         required
       />
       {fe.capitalUsed && (
@@ -244,6 +310,7 @@ export function OperationForm({
         step="0.5"
         value={expectedReturn}
         onChange={(e) => setExpectedReturn(Number(e.target.value))}
+        disabled={locked}
         required
       />
     </div>
@@ -258,6 +325,7 @@ export function OperationForm({
         type="date"
         value={startDate}
         onChange={(e) => setStartDate(e.target.value)}
+        disabled={locked}
         required
       />
     </div>
@@ -305,8 +373,9 @@ export function OperationForm({
             <button
               key={value}
               type="button"
+              disabled={locked}
               onClick={() => setFrequency(value)}
-              className={`rounded-md border px-3 py-1.5 text-sm transition-colors ${
+              className={`rounded-md border px-3 py-1.5 text-sm transition-colors disabled:opacity-50 ${
                 on
                   ? "border-gold bg-gold/10 text-gold"
                   : "border-border text-muted-foreground hover:bg-muted/40"
@@ -336,6 +405,7 @@ export function OperationForm({
           min="1"
           max="365"
           value={daysFieldValue}
+          disabled={locked}
           onChange={(e) => {
             setTermDays(Number(e.target.value));
             setLastEdited("TERM");
@@ -355,6 +425,7 @@ export function OperationForm({
           min="1000"
           step="1000"
           value={amountFieldValue}
+          disabled={locked}
           onChange={(e) => {
             setDailyAmount(Number(e.target.value));
             setLastEdited("DAILY_AMOUNT");
@@ -378,8 +449,9 @@ export function OperationForm({
             <button
               key={day}
               type="button"
+              disabled={locked}
               onClick={() => toggleWeekday(day)}
-              className={`rounded-md border px-3 py-1.5 text-sm transition-colors ${
+              className={`rounded-md border px-3 py-1.5 text-sm transition-colors disabled:opacity-50 ${
                 on
                   ? "border-gold bg-gold/10 text-gold"
                   : "border-border text-muted-foreground hover:bg-muted/40"
@@ -464,7 +536,13 @@ export function OperationForm({
           <Users className="size-5 text-gold" />
           <CardTitle>Inversionistas participantes</CardTitle>
         </div>
-        <Button type="button" variant="outline" size="sm" onClick={addParticipant}>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={addParticipant}
+          disabled={locked}
+        >
           <Plus className="size-4" /> Agregar
         </Button>
       </CardHeader>
@@ -485,6 +563,7 @@ export function OperationForm({
               <select
                 className={selectClass}
                 value={p.investorId}
+                disabled={locked}
                 onChange={(e) =>
                   updateParticipant(idx, { investorId: e.target.value })
                 }
@@ -510,6 +589,7 @@ export function OperationForm({
                 min="0"
                 step="1000"
                 value={p.amount || ""}
+                disabled={locked}
                 onChange={(e) =>
                   updateParticipant(idx, { amount: Number(e.target.value) })
                 }
@@ -520,6 +600,7 @@ export function OperationForm({
               variant="ghost"
               size="icon"
               onClick={() => removeParticipant(idx)}
+              disabled={locked}
               className="text-muted-foreground hover:text-destructive"
               title="Quitar"
             >
@@ -542,6 +623,18 @@ export function OperationForm({
   return (
     <form action={action} className="grid gap-6 lg:grid-cols-3">
       <div className="space-y-6 lg:col-span-2">
+        {locked && (
+          <div className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-600 dark:text-amber-400">
+            <AlertCircle className="mt-0.5 size-4 shrink-0" />
+            <span>
+              Este préstamo ya tiene cobros registrados, así que el monto, las
+              fechas, las cuotas y la frecuencia están bloqueados. Para
+              corregirlos, primero revierte los cobros (botón ↩ en cada cuota
+              cobrada) y vuelve a editar. Por ahora puedes cambiar cliente,
+              teléfono, riesgo y nota.
+            </span>
+          </div>
+        )}
         {isLoan ? (
           /* ===================== MODO PRÉSTAMO ===================== */
           <>
@@ -566,6 +659,7 @@ export function OperationForm({
                       name="description"
                       rows={2}
                       placeholder="Nota sobre el préstamo…"
+                      defaultValue={initialValues?.description ?? ""}
                     />
                   </div>
                 ) : (
@@ -626,6 +720,7 @@ export function OperationForm({
                     id="name"
                     name="name"
                     placeholder="Ej. Importación de mercadería verano"
+                    defaultValue={initialValues?.name ?? ""}
                     required
                   />
                   {fe.name && (
@@ -641,6 +736,7 @@ export function OperationForm({
                     id="business"
                     name="business"
                     placeholder="Ej. Sucursal Maipú"
+                    defaultValue={initialValues?.business ?? ""}
                   />
                 </div>
 
@@ -651,6 +747,7 @@ export function OperationForm({
                     name="description"
                     rows={2}
                     placeholder="Detalle de la operación…"
+                    defaultValue={initialValues?.description ?? ""}
                   />
                 </div>
 
@@ -660,7 +757,7 @@ export function OperationForm({
                     id="responsibleId"
                     name="responsibleId"
                     className={selectClass}
-                    defaultValue=""
+                    defaultValue={initialValues?.responsibleId ?? ""}
                   >
                     <option value="">— Sin asignar —</option>
                     {staff.map((s) => (
@@ -778,9 +875,26 @@ export function OperationForm({
         )}
 
         <div className="flex gap-2">
-          <SubmitButton label={isLoan ? "Crear préstamo" : "Crear operación"} />
+          <SubmitButton
+            label={
+              isEdit
+                ? "Guardar cambios"
+                : isLoan
+                  ? "Crear préstamo"
+                  : "Crear operación"
+            }
+            pendingLabel={isEdit ? "Guardando…" : "Creando…"}
+          />
           <Button asChild variant="outline">
-            <Link href="/operaciones">Cancelar</Link>
+            <Link
+              href={
+                isEdit && operationId
+                  ? `/operaciones/${operationId}`
+                  : "/operaciones"
+              }
+            >
+              Cancelar
+            </Link>
           </Button>
         </div>
       </div>
