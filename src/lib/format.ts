@@ -23,6 +23,26 @@ export function formatCompact(value: number | null | undefined): string {
   return "$" + CLP_COMPACT.format(value);
 }
 
+/**
+ * Agrupa los miles mientras se escribe un monto: "9000" -> "9.000".
+ * Solo dígitos: los pesos chilenos no llevan decimales.
+ */
+export function formatAmountInput(
+  raw: string | number | null | undefined,
+): string {
+  const digits = String(raw ?? "")
+    .replace(/\D/g, "")
+    .replace(/^0+(?=\d)/, "");
+  if (!digits) return "";
+  return digits.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+}
+
+/** Valor numérico de un monto tecleado ("9.000" -> 9000). */
+export function parseAmountInput(raw: string | null | undefined): number {
+  const digits = String(raw ?? "").replace(/\D/g, "");
+  return digits ? Number(digits) : 0;
+}
+
 export function formatPercent(
   value: number | null | undefined,
   digits = 1,

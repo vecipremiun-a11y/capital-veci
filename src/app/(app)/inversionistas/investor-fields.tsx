@@ -5,6 +5,7 @@ import { Check } from "lucide-react";
 import { cleanRut, formatRut, validateRut } from "@/lib/format";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { cn } from "@/lib/utils";
 
 /** Códigos de país más usados; Chile (+56) por defecto. */
 export const COUNTRY_CODES = [
@@ -125,14 +126,14 @@ export function PhoneInput({
   const combined = number.trim() ? `${code} ${number.trim()}` : "";
 
   return (
-    <div className="space-y-2">
+    <div className="min-w-0 space-y-2">
       <Label htmlFor="phoneNumber">Teléfono</Label>
       {/* Valor combinado (código país + número) que recibe el servidor */}
       <input type="hidden" name="phone" value={combined} />
       <div className="flex gap-2">
         <select
           aria-label="Código de país"
-          className={`${selectClass} w-auto shrink-0`}
+          className={cn(selectClass, "w-28 shrink-0 px-2")}
           value={code}
           onChange={(e) => setCode(e.target.value)}
         >
@@ -144,6 +145,7 @@ export function PhoneInput({
         </select>
         <Input
           id="phoneNumber"
+          className="min-w-0 flex-1"
           inputMode="tel"
           autoComplete="tel"
           placeholder="9 1234 5678"

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Input } from "@/components/ui/input";
+import { MoneyInput } from "@/components/ui/money-input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
@@ -26,8 +26,10 @@ export function LiquiditySimulator({
   const newWorking = capitalWorking + extraCommit;
   const newReserves = Math.max(reserves - releaseReserve, 0);
   const newAvailable = totalCapital - newWorking - newReserves;
-  const newCommitmentRatio = totalCapital > 0 ? (newWorking / totalCapital) * 100 : 0;
-  const newLiquidityRatio = totalCapital > 0 ? (newAvailable / totalCapital) * 100 : 0;
+  const newCommitmentRatio =
+    totalCapital > 0 ? (newWorking / totalCapital) * 100 : 0;
+  const newLiquidityRatio =
+    totalCapital > 0 ? (newAvailable / totalCapital) * 100 : 0;
 
   const breachesMin = newAvailable < minLiquidity;
   const breachesMax = newCommitmentRatio > maxCommitment;
@@ -38,13 +40,10 @@ export function LiquiditySimulator({
       <div className="space-y-4">
         <div className="space-y-2">
           <Label htmlFor="commit">Comprometer capital adicional</Label>
-          <Input
+          <MoneyInput
             id="commit"
-            type="number"
-            min="0"
-            step="1000000"
-            value={extraCommit || ""}
-            onChange={(e) => setExtraCommit(Math.max(Number(e.target.value), 0))}
+            value={extraCommit}
+            onValueChange={setExtraCommit}
             placeholder="Ej: 50.000.000"
           />
           <p className="text-xs text-muted-foreground">
@@ -54,14 +53,10 @@ export function LiquiditySimulator({
 
         <div className="space-y-2">
           <Label htmlFor="release">Liberar reservas</Label>
-          <Input
+          <MoneyInput
             id="release"
-            type="number"
-            min="0"
-            step="1000000"
-            value={releaseReserve || ""}
-            onChange={(e) => setReleaseReserve(Math.max(Number(e.target.value), 0))}
-            placeholder="0"
+            value={releaseReserve}
+            onValueChange={setReleaseReserve}
           />
         </div>
 
@@ -81,9 +76,13 @@ export function LiquiditySimulator({
 
       <div className="space-y-4 rounded-xl border border-border bg-card/50 p-4">
         <div>
-          <p className="text-xs text-muted-foreground">Capital comprometido (escenario)</p>
+          <p className="text-xs text-muted-foreground">
+            Capital comprometido (escenario)
+          </p>
           <div className="mt-1 flex items-center justify-between">
-            <span className="font-medium tabular">{formatCurrency(newWorking)}</span>
+            <span className="font-medium tabular">
+              {formatCurrency(newWorking)}
+            </span>
             <span className="text-xs text-muted-foreground tabular">
               {formatPercent(newCommitmentRatio)}
             </span>
@@ -91,12 +90,16 @@ export function LiquiditySimulator({
           <Progress
             value={Math.min(newCommitmentRatio, 100)}
             className="mt-2"
-            indicatorClassName={breachesMax ? "bg-[hsl(var(--danger))]" : "bg-gold"}
+            indicatorClassName={
+              breachesMax ? "bg-[hsl(var(--danger))]" : "bg-gold"
+            }
           />
         </div>
 
         <div>
-          <p className="text-xs text-muted-foreground">Liquidez disponible (escenario)</p>
+          <p className="text-xs text-muted-foreground">
+            Liquidez disponible (escenario)
+          </p>
           <div className="mt-1 flex items-center justify-between">
             <span
               className={`font-medium tabular ${
@@ -112,13 +115,17 @@ export function LiquiditySimulator({
           <Progress
             value={Math.min(Math.max(newLiquidityRatio, 0), 100)}
             className="mt-2"
-            indicatorClassName={breachesMin ? "bg-[hsl(var(--danger))]" : "bg-emerald"}
+            indicatorClassName={
+              breachesMin ? "bg-[hsl(var(--danger))]" : "bg-emerald"
+            }
           />
         </div>
 
         <div>
           <p className="text-xs text-muted-foreground">Reservas (escenario)</p>
-          <p className="mt-1 font-medium tabular">{formatCurrency(newReserves)}</p>
+          <p className="mt-1 font-medium tabular">
+            {formatCurrency(newReserves)}
+          </p>
         </div>
       </div>
     </div>

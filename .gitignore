@@ -38,3 +38,6 @@ yarn-error.log*
 .idea
 
 .vercel
+
+# respaldos de base de datos (contienen datos financieros)
+/backups/

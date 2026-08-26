@@ -21,6 +21,7 @@ import {
   type OperationFormState,
 } from "../actions";
 import { Input } from "@/components/ui/input";
+import { MoneyInput } from "@/components/ui/money-input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
@@ -117,7 +118,9 @@ export function OperationForm({
   const isLoan = category === "LOANS";
 
   // Estado del formulario para el preview financiero en vivo
-  const [capitalUsed, setCapitalUsed] = useState(initialValues?.capitalUsed ?? 0);
+  const [capitalUsed, setCapitalUsed] = useState(
+    initialValues?.capitalUsed ?? 0,
+  );
   const [expectedReturn, setExpectedReturn] = useState(
     initialValues?.expectedReturn ?? 20,
   );
@@ -279,14 +282,11 @@ export function OperationForm({
       <Label htmlFor="capitalUsed">
         {isLoan ? "Monto prestado (CLP)" : "Capital utilizado (CLP)"}
       </Label>
-      <Input
+      <MoneyInput
         id="capitalUsed"
         name="capitalUsed"
-        type="number"
-        min="0"
-        step="1000"
-        value={capitalUsed || ""}
-        onChange={(e) => setCapitalUsed(Number(e.target.value))}
+        value={capitalUsed}
+        onValueChange={setCapitalUsed}
         disabled={locked}
         required
       />
@@ -419,15 +419,12 @@ export function OperationForm({
       </div>
       <div className="space-y-2">
         <Label htmlFor="dailyAmount">Monto por cuota (CLP)</Label>
-        <Input
+        <MoneyInput
           id="dailyAmount"
-          type="number"
-          min="1000"
-          step="1000"
-          value={amountFieldValue}
+          value={Number(amountFieldValue) || 0}
           disabled={locked}
-          onChange={(e) => {
-            setDailyAmount(Number(e.target.value));
+          onValueChange={(v) => {
+            setDailyAmount(v);
             setLastEdited("DAILY_AMOUNT");
           }}
         />
@@ -584,15 +581,10 @@ export function OperationForm({
             </div>
             <div className="space-y-1">
               <Label className="text-xs">Aporte (CLP)</Label>
-              <Input
-                type="number"
-                min="0"
-                step="1000"
-                value={p.amount || ""}
+              <MoneyInput
+                value={p.amount}
                 disabled={locked}
-                onChange={(e) =>
-                  updateParticipant(idx, { amount: Number(e.target.value) })
-                }
+                onValueChange={(v) => updateParticipant(idx, { amount: v })}
               />
             </div>
             <Button
@@ -862,7 +854,11 @@ export function OperationForm({
         />
         {isLoan && (
           <>
-            <input type="hidden" name="name" value={`Préstamo a ${borrowerName}`} />
+            <input
+              type="hidden"
+              name="name"
+              value={`Préstamo a ${borrowerName}`}
+            />
             <input type="hidden" name="status" value="ACTIVE" />
           </>
         )}
@@ -915,7 +911,11 @@ export function OperationForm({
             <CardContent className="space-y-3">
               <Row label="Cliente" value={borrowerName || "—"} />
               <Row label="Monto prestado" value={formatCurrency(capitalUsed)} />
-              <Row label="Total a cobrar" value={formatCurrency(loanTotal)} accent />
+              <Row
+                label="Total a cobrar"
+                value={formatCurrency(loanTotal)}
+                accent
+              />
               <Row
                 label="Ganancia"
                 value={formatCurrency(loanProfit)}
@@ -929,7 +929,9 @@ export function OperationForm({
               <Row
                 label="Cuota diaria"
                 value={
-                  dailySchedule ? formatCurrency(dailySchedule.dailyAmount) : "—"
+                  dailySchedule
+                    ? formatCurrency(dailySchedule.dailyAmount)
+                    : "—"
                 }
                 accent
               />
@@ -945,7 +947,9 @@ export function OperationForm({
                   crearlo
                 </p>
                 <ul className="list-disc space-y-0.5 pl-4">
-                  <li>Baja la liquidez disponible en {formatCurrency(capitalUsed)}</li>
+                  <li>
+                    Baja la liquidez disponible en {formatCurrency(capitalUsed)}
+                  </li>
                   {dailySchedule && (
                     <li>
                       Se generan {dailySchedule.daysCount} cuotas de{" "}
@@ -1007,14 +1011,20 @@ export function OperationForm({
                   crearla
                 </p>
                 <ul className="list-disc space-y-0.5 pl-4">
-                  <li>Baja la liquidez disponible en {formatCurrency(capitalUsed)}</li>
-                  <li>Sube el capital comprometido en {formatCurrency(capitalUsed)}</li>
+                  <li>
+                    Baja la liquidez disponible en {formatCurrency(capitalUsed)}
+                  </li>
+                  <li>
+                    Sube el capital comprometido en{" "}
+                    {formatCurrency(capitalUsed)}
+                  </li>
                   <li>Se registra un movimiento tipo "Comprometido"</li>
                   <li>Cada participante queda vinculado con su aporte</li>
                   {isDailyLoan && dailySchedule && (
                     <li>
                       Se generan {dailySchedule.daysCount} cuotas de{" "}
-                      {formatCurrency(dailySchedule.dailyAmount)} para cobro diario
+                      {formatCurrency(dailySchedule.dailyAmount)} para cobro
+                      diario
                     </li>
                   )}
                 </ul>

@@ -33,6 +33,8 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     "edit_payments",
     "generate_contracts",
     "approve_movements",
+    "staff_capital",
+    "own_capital",
   ],
   CONTADOR: [
     "dashboard",
@@ -42,8 +44,15 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     "liquidity",
     "reports",
     "edit_payments",
+    "own_capital",
   ],
-  OPERADOR: ["dashboard", "investors", "operations", "contracts"],
+  OPERADOR: [
+    "dashboard",
+    "investors",
+    "operations",
+    "contracts",
+    "own_capital",
+  ],
   INVERSIONISTA: ["portal"],
 };
 
@@ -117,7 +126,11 @@ export const OPERATION_STATUS_LABELS: Record<string, string> = {
  * ACTIVE, PAUSED y RISK siguen contando como capital trabajando.
  * FINISHED ya devolvió el dinero. LOSS ya descontó del capital total.
  */
-export const OPERATION_COMMITTED_STATUSES = ["ACTIVE", "PAUSED", "RISK"] as const;
+export const OPERATION_COMMITTED_STATUSES = [
+  "ACTIVE",
+  "PAUSED",
+  "RISK",
+] as const;
 
 /**
  * Estados de contrato que cuentan como capital realmente aportado al fondo.
@@ -168,7 +181,15 @@ export const WEEKDAY_LABELS = [
 ] as const;
 
 /** Abreviaturas de días, indexadas por getDay(). */
-export const WEEKDAY_SHORT = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"] as const;
+export const WEEKDAY_SHORT = [
+  "Dom",
+  "Lun",
+  "Mar",
+  "Mié",
+  "Jue",
+  "Vie",
+  "Sáb",
+] as const;
 
 /** Días por defecto en que se cobra: lunes a sábado (sin domingo). */
 export const DEFAULT_COLLECT_WEEKDAYS = [1, 2, 3, 4, 5, 6] as const;
@@ -181,3 +202,15 @@ export const MOVEMENT_TYPE_LABELS: Record<string, string> = {
   RETURN: "Retorno de operación",
   LOSS: "Pérdida registrada",
 };
+
+/** Movimientos de la caja de un trabajador. */
+export const STAFF_ASSIGNMENT_TYPE_LABELS: Record<string, string> = {
+  ASSIGN: "Entrega de capital",
+  RETURN: "Devolución a la empresa",
+};
+
+/**
+ * Roles que manejan caja: se les puede asignar efectivo para colocar en
+ * operaciones. INVERSIONISTA queda fuera (solo entra al portal).
+ */
+export const STAFF_ROLES = ["ADMIN", "CONTADOR", "OPERADOR"] as const;

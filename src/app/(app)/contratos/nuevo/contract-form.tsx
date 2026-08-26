@@ -6,6 +6,7 @@ import Link from "next/link";
 import { Loader2, AlertCircle, Calculator } from "lucide-react";
 import { createContract, type ContractFormState } from "../actions";
 import { Input } from "@/components/ui/input";
+import { MoneyInput } from "@/components/ui/money-input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
@@ -14,6 +15,7 @@ import { Badge } from "@/components/ui/badge";
 import { formatCurrency, formatPercent, formatDate } from "@/lib/format";
 import { PAYMENT_FREQUENCY_OPTIONS } from "@/lib/constants";
 import { buildSchedule, type PaymentFrequency } from "@/lib/payments";
+import { cn } from "@/lib/utils";
 
 const selectClass =
   "flex h-10 w-full rounded-md border border-input bg-background/50 px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring";
@@ -93,7 +95,8 @@ export function ContractForm({
         annualRate,
         durationMonths: duration,
         frequency,
-        customIntervalMonths: frequency === "CUSTOM" ? customInterval : undefined,
+        customIntervalMonths:
+          frequency === "CUSTOM" ? customInterval : undefined,
         periodicInterestPct:
           frequency === "CUSTOM"
             ? periodicPct
@@ -144,28 +147,29 @@ export function ContractForm({
 
             <div className="space-y-2">
               <Label htmlFor="amount">Monto del contrato (CLP)</Label>
-              <Input
+              <MoneyInput
                 id="amount"
                 name="amount"
-                type="number"
-                min="0"
-                step="1000"
-                value={amount || ""}
-                onChange={(e) => setAmount(Number(e.target.value))}
+                value={amount}
+                onValueChange={setAmount}
                 required
               />
-              {fe.amount && <p className="text-xs text-destructive">{fe.amount}</p>}
+              {fe.amount && (
+                <p className="text-xs text-destructive">{fe.amount}</p>
+              )}
             </div>
 
             <div className="space-y-2">
               <Label htmlFor="returnRateInput">
-                Retorno estimado {rateMode === "MONTHLY" ? "mensual" : "anual"} (%)
+                Retorno estimado {rateMode === "MONTHLY" ? "mensual" : "anual"}{" "}
+                (%)
               </Label>
               {/* La tasa anual es lo que se guarda y valida en el servidor. */}
               <input type="hidden" name="returnRate" value={annualRate} />
               <div className="flex gap-2">
                 <Input
                   id="returnRateInput"
+                  className="min-w-0 flex-1"
                   type="number"
                   min="0"
                   max={rateMode === "MONTHLY" ? "100" : "1000"}
@@ -176,7 +180,7 @@ export function ContractForm({
                 />
                 <select
                   aria-label="Periodicidad de la tasa"
-                  className={`${selectClass} w-auto shrink-0`}
+                  className={cn(selectClass, "w-28 shrink-0 px-2")}
                   value={rateMode}
                   onChange={(e) =>
                     setRateMode(e.target.value as "ANNUAL" | "MONTHLY")
@@ -226,7 +230,12 @@ export function ContractForm({
 
             <div className="space-y-2">
               <Label htmlFor="modality">Modalidad</Label>
-              <select id="modality" name="modality" className={selectClass} defaultValue={defaultModality}>
+              <select
+                id="modality"
+                name="modality"
+                className={selectClass}
+                defaultValue={defaultModality}
+              >
                 <option value="FIXED">Renta fija</option>
                 <option value="VARIABLE">Renta variable</option>
                 <option value="PARTICIPATION">Participación</option>
@@ -241,7 +250,9 @@ export function ContractForm({
                 name="paymentFrequency"
                 className={selectClass}
                 value={frequency}
-                onChange={(e) => setFrequency(e.target.value as PaymentFrequency)}
+                onChange={(e) =>
+                  setFrequency(e.target.value as PaymentFrequency)
+                }
               >
                 {PAYMENT_FREQUENCY_OPTIONS.map((o) => (
                   <option key={o.value} value={o.value}>
@@ -293,9 +304,8 @@ export function ContractForm({
                     onChange={(e) => setPeriodicPct(Number(e.target.value))}
                   />
                   <p className="text-xs text-muted-foreground">
-                    El resto (
-                    {formatPercent(100 - periodicPct, 0)}) se acumula y se paga
-                    al vencimiento junto con el capital.
+                    El resto ({formatPercent(100 - periodicPct, 0)}) se acumula
+                    y se paga al vencimiento junto con el capital.
                   </p>
                 </div>
               </>
@@ -342,7 +352,10 @@ export function ContractForm({
           </CardHeader>
           <CardContent className="space-y-4">
             <Row label="Capital" value={formatCurrency(amount)} />
-            <Row label="Retorno estimado anual" value={formatPercent(annualRate)} />
+            <Row
+              label="Retorno estimado anual"
+              value={formatPercent(annualRate)}
+            />
             <Row
               label="Equivale mensual"
               value={formatPercent(annualRate / 12, 2)}
@@ -397,7 +410,10 @@ export function ContractForm({
               <ul className="space-y-1 text-xs">
                 {previewRows.map((p, idx) =>
                   p === null ? (
-                    <li key={`gap-${idx}`} className="text-center text-muted-foreground">
+                    <li
+                      key={`gap-${idx}`}
+                      className="text-center text-muted-foreground"
+                    >
                       ⋮
                     </li>
                   ) : (

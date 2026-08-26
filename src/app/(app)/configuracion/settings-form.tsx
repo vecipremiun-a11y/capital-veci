@@ -4,10 +4,17 @@ import { useActionState, useEffect } from "react";
 import { useFormStatus } from "react-dom";
 import { Loader2, Save, CheckCircle2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { MoneyInput } from "@/components/ui/money-input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+} from "@/components/ui/card";
 import { updateSettings, type SettingsState } from "./actions";
 import { toast } from "sonner";
 
@@ -54,11 +61,20 @@ export function SettingsForm({
         <CardContent className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="companyName">Nombre comercial</Label>
-            <Input id="companyName" name="companyName" defaultValue={initial.companyName} required />
+            <Input
+              id="companyName"
+              name="companyName"
+              defaultValue={initial.companyName}
+              required
+            />
           </div>
           <div className="space-y-2">
             <Label htmlFor="legalName">Razón social</Label>
-            <Input id="legalName" name="legalName" defaultValue={initial.legalName ?? ""} />
+            <Input
+              id="legalName"
+              name="legalName"
+              defaultValue={initial.legalName ?? ""}
+            />
           </div>
           <div className="space-y-2">
             <Label htmlFor="taxId">RUT empresa</Label>
@@ -90,18 +106,16 @@ export function SettingsForm({
           </div>
           <div className="space-y-2">
             <Label htmlFor="minLiquidity">Liquidez mínima exigida (CLP)</Label>
-            <Input
+            <MoneyInput
               id="minLiquidity"
               name="minLiquidity"
-              type="number"
-              min="0"
-              step="1000000"
               defaultValue={initial.minLiquidity}
-              required
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="maxCommitment">% máximo de capital comprometido</Label>
+            <Label htmlFor="maxCommitment">
+              % máximo de capital comprometido
+            </Label>
             <Input
               id="maxCommitment"
               name="maxCommitment"

@@ -323,6 +323,9 @@ export async function createLoan(
             : null,
         borrowerName: input.borrowerName || null,
         borrowerPhone: input.borrowerPhone || null,
+        // Queda a nombre de quien lo crea: es la base del panel de caja por
+        // trabajador (ver src/lib/data/staff-capital.ts).
+        responsibleId: userId ?? null,
       },
     });
 

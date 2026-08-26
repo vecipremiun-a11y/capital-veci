@@ -19,23 +19,25 @@ datasource db {
 //  Usuarios y acceso
 // ---------------------------------------------------------
 model User {
-  id           String   @id @default(cuid())
-  email        String   @unique
+  id           String    @id @default(cuid())
+  email        String    @unique
   name         String
   passwordHash String
   // ADMIN | CONTADOR | OPERADOR | INVERSIONISTA
-  role         String   @default("OPERADOR")
-  active       Boolean  @default(true)
+  role         String    @default("OPERADOR")
+  active       Boolean   @default(true)
   lastLoginAt  DateTime?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
   // Vínculo opcional con un inversionista (para el portal privado)
   investor   Investor? @relation(fields: [investorId], references: [id], onDelete: SetNull)
   investorId String?   @unique
 
-  auditLogs              AuditLog[]
-  responsibleOperations  Operation[] @relation("OperationResponsible")
+  auditLogs             AuditLog[]
+  responsibleOperations Operation[]       @relation("OperationResponsible")
+  capitalAssignments    StaffAssignment[] @relation("StaffAssignmentUser")
+  registeredAssignments StaffAssignment[] @relation("StaffAssignmentAuthor")
 }
 
 // ---------------------------------------------------------
@@ -74,58 +76,58 @@ model Investor {
 //  durationMonths) representan "variable / según operación".
 // ---------------------------------------------------------
 model ContractTemplate {
-  id               String   @id @default(cuid())
-  code             String   @unique
-  name             String
-  description      String?
+  id                   String   @id @default(cuid())
+  code                 String   @unique
+  name                 String
+  description          String?
   // FIXED | VARIABLE | PARTICIPATION
-  modality         String   @default("FIXED")
+  modality             String   @default("FIXED")
   // MONTHLY | QUARTERLY | AT_MATURITY | CUSTOM
-  paymentFrequency String   @default("MONTHLY")
+  paymentFrequency     String   @default("MONTHLY")
   customIntervalMonths Int?
-  periodicInterestPct  Float @default(100)
+  periodicInterestPct  Float    @default(100)
   // Si returnRate es null se considera "variable / según operación"
-  returnRate       Float?
+  returnRate           Float?
   // Override del texto mostrado en la tarjeta para la rentabilidad
-  rateLabel        String?
+  rateLabel            String?
   // Si durationMonths es null se considera "variable"
-  durationMonths   Int?
+  durationMonths       Int?
   // Override del texto mostrado en la tarjeta para el plazo
-  durationLabel    String?
-  isDefault        Boolean  @default(false)
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  durationLabel        String?
+  isDefault            Boolean  @default(false)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
 }
 
 // ---------------------------------------------------------
 //  Contratos digitales
 // ---------------------------------------------------------
 model Contract {
-  id             String   @id @default(cuid())
-  code           String   @unique
-  investor       Investor @relation(fields: [investorId], references: [id], onDelete: Cascade)
-  investorId     String
-  amount         Float
-  durationMonths Int
+  id                   String    @id @default(cuid())
+  code                 String    @unique
+  investor             Investor  @relation(fields: [investorId], references: [id], onDelete: Cascade)
+  investorId           String
+  amount               Float
+  durationMonths       Int
   // Rentabilidad pactada (%)
-  returnRate     Float
+  returnRate           Float
   // FIXED | VARIABLE | PARTICIPATION
-  modality       String   @default("FIXED")
+  modality             String    @default("FIXED")
   // MONTHLY | QUARTERLY | AT_MATURITY | CUSTOM — define el modelo de pago
-  paymentFrequency     String  @default("MONTHLY")
+  paymentFrequency     String    @default("MONTHLY")
   // CUSTOM: cada cuántos meses se paga interés
   customIntervalMonths Int?
   // CUSTOM: % del interés del período que se paga (resto acumula al final)
-  periodicInterestPct  Float   @default(100)
-  startDate      DateTime
-  endDate        DateTime
+  periodicInterestPct  Float     @default(100)
+  startDate            DateTime
+  endDate              DateTime
   // DRAFT | ACTIVE | SIGNED | EXPIRED | CANCELLED
-  status         String   @default("DRAFT")
-  conditions     String?
-  signedAt       DateTime?
-  signatureName  String?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  status               String    @default("DRAFT")
+  conditions           String?
+  signedAt             DateTime?
+  signatureName        String?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
 
   payments  Payment[]
   documents Document[]
@@ -171,21 +173,21 @@ model Payment {
 //      y baja el capital total administrado.
 // ---------------------------------------------------------
 model Operation {
-  id             String    @id @default(cuid())
-  code           String    @unique
-  name           String
-  description    String?
+  id            String  @id @default(cuid())
+  code          String  @unique
+  name          String
+  description   String?
   // MINIMARKET | LOANS | BARBERSHOP | SOFTWARE | CLEANING | IMPORTS | STOCK | COMMERCIAL | EXPANSION
-  category       String    @default("COMMERCIAL")
+  category      String  @default("COMMERCIAL")
   // Negocio o sucursal asociado (texto libre)
-  business       String?
+  business      String?
   // Usuario staff responsable de seguir la operación
-  responsibleId  String?
-  responsible    User?     @relation("OperationResponsible", fields: [responsibleId], references: [id], onDelete: SetNull)
+  responsibleId String?
+  responsible   User?   @relation("OperationResponsible", fields: [responsibleId], references: [id], onDelete: SetNull)
 
-  capitalUsed    Float     @default(0)
+  capitalUsed    Float  @default(0)
   // % esperado anualizado (informativo)
-  expectedReturn Float     @default(0)
+  expectedReturn Float  @default(0)
   // % real, calculado al finalizar = (returnAmount - capitalUsed) / capitalUsed * 100
   actualReturn   Float?
   // Monto bruto devuelto al finalizar (capital + utilidad o recuperado parcial)
@@ -194,14 +196,14 @@ model Operation {
   profit         Float?
 
   // ACTIVE | FINISHED | RISK | PAUSED | LOSS
-  status         String    @default("ACTIVE")
+  status    String    @default("ACTIVE")
   // LOW | MEDIUM | HIGH
-  riskLevel      String    @default("MEDIUM")
-  startDate      DateTime
-  endDate        DateTime?
+  riskLevel String    @default("MEDIUM")
+  startDate DateTime
+  endDate   DateTime?
   // Cuándo se cerró efectivamente (FINISHED o LOSS)
-  closedAt       DateTime?
-  result         String?
+  closedAt  DateTime?
+  result    String?
 
   // --- Cobro diario (préstamos en cuotas diarias) ---
   // Si está activo, la operación genera un calendario de cuotas (LoanInstallment).
@@ -216,8 +218,8 @@ model Operation {
   borrowerName    String?
   borrowerPhone   String?
 
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   movements    CapitalMovement[]
   participants OperationParticipant[]
@@ -360,6 +362,39 @@ model AuditLog {
   entityId  String?
   detail    String?
   createdAt DateTime @default(now())
+}
+
+// ---------------------------------------------------------
+//  Capital entregado a trabajadores (caja de cada operador)
+//
+//  Cada fila es un movimiento de custodia: la empresa le pasa
+//  efectivo a un trabajador para que lo coloque en préstamos
+//  (ASSIGN), o el trabajador devuelve efectivo (RETURN).
+//
+//  NO es un movimiento de capital de la empresa: la plata sigue
+//  siendo del fondo, solo cambia de manos. Por eso no genera
+//  CapitalMovement ni afecta la liquidez global; lo que sí afecta
+//  la liquidez es cuando ese efectivo se coloca en una Operation.
+//
+//  El efectivo en mano del trabajador se deriva de estas filas
+//  más sus operaciones y cobros (ver src/lib/data/staff-capital.ts).
+// ---------------------------------------------------------
+model StaffAssignment {
+  id        String   @id @default(cuid())
+  user      User     @relation("StaffAssignmentUser", fields: [userId], references: [id], onDelete: Cascade)
+  userId    String
+  // ASSIGN | RETURN
+  type      String   @default("ASSIGN")
+  amount    Float
+  note      String?
+  date      DateTime @default(now())
+  // Admin que registró el movimiento
+  author    User?    @relation("StaffAssignmentAuthor", fields: [authorId], references: [id], onDelete: SetNull)
+  authorId  String?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([date])
 }
 
 // ---------------------------------------------------------

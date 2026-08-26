@@ -3,7 +3,7 @@
 import { useEffect, useState, useTransition } from "react";
 import { Check, Undo2, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { MoneyInput } from "@/components/ui/money-input";
 import { Label } from "@/components/ui/label";
 import {
   Dialog,
@@ -116,10 +116,13 @@ function CollectDialog({
         (res.installmentsTouched ?? 1) > 1
           ? ` · excedente aplicado a ${(res.installmentsTouched ?? 1) - 1} cuota(s) siguiente(s)`
           : "";
-      const sobro = res.leftover && res.leftover > 0
-        ? ` · sobró ${formatCurrency(res.leftover)} (excede el total)`
-        : "";
-      toast.success(`Cobrado ${formatCurrency(res.applied ?? value)}${spill}${sobro}`);
+      const sobro =
+        res.leftover && res.leftover > 0
+          ? ` · sobró ${formatCurrency(res.leftover)} (excede el total)`
+          : "";
+      toast.success(
+        `Cobrado ${formatCurrency(res.applied ?? value)}${spill}${sobro}`,
+      );
       onOpenChange(false);
     });
   }
@@ -143,7 +146,9 @@ function CollectDialog({
             </div>
             <div>
               <p className="text-xs text-muted-foreground">Ya cobrado</p>
-              <p className="font-medium tabular">{formatCurrency(paidAmount)}</p>
+              <p className="font-medium tabular">
+                {formatCurrency(paidAmount)}
+              </p>
             </div>
             <div>
               <p className="text-xs text-muted-foreground">Saldo</p>
@@ -155,14 +160,11 @@ function CollectDialog({
 
           <div className="space-y-2">
             <Label htmlFor="collectAmount">Monto a cobrar (CLP)</Label>
-            <Input
+            <MoneyInput
               id="collectAmount"
-              type="number"
-              min="0"
-              step="1000"
               autoFocus
-              value={value || ""}
-              onChange={(e) => setValue(Number(e.target.value))}
+              value={value}
+              onValueChange={setValue}
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
                   e.preventDefault();

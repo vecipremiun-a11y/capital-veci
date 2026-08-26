@@ -8,6 +8,8 @@ import {
   BarChart3,
   ShieldCheck,
   Settings,
+  HandCoins,
+  PiggyBank,
   type LucideIcon,
 } from "lucide-react";
 
@@ -114,6 +116,18 @@ export const NAV_SECTIONS: NavSection[] = [
           { label: "Cobros del día", href: "/operaciones/cobros" },
           { label: "Rendimiento", href: "/operaciones/rendimiento" },
         ],
+      },
+      {
+        label: "Trabajadores",
+        href: "/trabajadores",
+        icon: HandCoins,
+        permission: "staff_capital",
+      },
+      {
+        label: "Mi caja",
+        href: "/mi-caja",
+        icon: PiggyBank,
+        permission: "own_capital",
       },
       {
         label: "Reportes",

@@ -12,7 +12,7 @@ import {
   TrendingDown,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { MoneyInput } from "@/components/ui/money-input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -187,14 +187,11 @@ function FinalizeDialog({
         <form action={action} className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="returnAmount">Monto devuelto (CLP)</Label>
-            <Input
+            <MoneyInput
               id="returnAmount"
               name="returnAmount"
-              type="number"
-              min="0"
-              step="1000"
-              value={returnAmount || ""}
-              onChange={(e) => setReturnAmount(Number(e.target.value))}
+              value={returnAmount}
+              onValueChange={setReturnAmount}
               required
             />
             {fe.returnAmount && (
@@ -215,7 +212,9 @@ function FinalizeDialog({
               <span className="font-medium">Utilidad</span>
               <span
                 className={`font-semibold tabular ${
-                  profit >= 0 ? "text-[hsl(var(--success))]" : "text-destructive"
+                  profit >= 0
+                    ? "text-[hsl(var(--success))]"
+                    : "text-destructive"
                 }`}
               >
                 {profit >= 0 ? "+" : ""}
@@ -306,15 +305,11 @@ function LossDialog({
         <form action={action} className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="recovered">Monto recuperado (CLP)</Label>
-            <Input
+            <MoneyInput
               id="recovered"
               name="recovered"
-              type="number"
-              min="0"
-              max={capitalUsed}
-              step="1000"
-              value={recovered || ""}
-              onChange={(e) => setRecovered(Number(e.target.value))}
+              value={recovered}
+              onValueChange={setRecovered}
               required
             />
             {fe.recovered && (
